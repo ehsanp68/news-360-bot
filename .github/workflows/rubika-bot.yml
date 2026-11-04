@@ -1,0 +1,120 @@
+# ☁️ اجرای دائمی ربات خبر روبیکا روی GitHub Actions (بدون نیاز به سیستم شخصی)
+#
+# هر نوبت حداکثر ~۵.۵ ساعت اجرا می‌شود (محدودیت هر جاب گیت‌هاب ۶ ساعت است)،
+# سپس وضعیت ذخیره شده و ورک‌فلو خودش نوبت بعدی را شروع می‌کند (زنجیره اجرا).
+# یک cron پشتیبان هم هر ۵ ساعت وجود دارد تا اگر زنجیره قطع شد، ربات دوباره بالا بیاید.
+#
+# راه‌اندازی:
+#   Settings → Secrets and variables → Actions → New repository secret:
+#     RUBIKA_BOT_TOKEN   = توکن ربات روبیکا
+#     RUBIKA_CHANNEL_ID  = آیدی کانال روبیکا (مثل @news360_24)
+#   سپس Actions → Rubika News Bot → Run workflow
+#
+# توقف موقت:
+#   Variables → New variable: BOT_ENABLED = false  و اجرای در حال انجام را Cancel کنید.
+# شروع دوباره:
+#   مقدار BOT_ENABLED را true کنید (یا حذفش کنید) و Run workflow بزنید.
+
+name: Rubika News Bot
+
+on:
+  workflow_dispatch:
+    inputs:
+      runtime_minutes:
+        description: 'مدت اجرای این نوبت (دقیقه)'
+        required: false
+        default: '330'
+  schedule:
+    # پشتیبان: اگر زنجیره اجرای خودکار قطع شد، ربات دوباره شروع می‌شود
+    - cron: '0 */5 * * *'
+
+permissions:
+  contents: write   # ذخیره وضعیت (state) در مخزن
+  actions: write    # شروع نوبت بعدی (زنجیره اجرا)
+
+# جلوگیری از اجرای همزمان چند نوبت روی یک برنچ
+concurrency:
+  group: rubika-news-bot-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Guard (enabled + secrets)
+        id: guard
+        env:
+          RUBIKA_BOT_TOKEN: ${{ secrets.RUBIKA_BOT_TOKEN }}
+          RUBIKA_CHANNEL_ID: ${{ secrets.RUBIKA_CHANNEL_ID }}
+          BOT_ENABLED: ${{ vars.BOT_ENABLED }}
+        run: |
+          if [ "$BOT_ENABLED" = "false" ]; then
+            echo "::notice::Bot is paused (BOT_ENABLED=false). To resume: set it to true (or delete it), then Run workflow."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "$RUBIKA_BOT_TOKEN" ] || [ -z "$RUBIKA_CHANNEL_ID" ]; then
+            echo "::warning::Secrets are missing! Add RUBIKA_BOT_TOKEN and RUBIKA_CHANNEL_ID in Settings -> Secrets and variables -> Actions, then Run workflow."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        if: steps.guard.outputs.enabled == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run bot (Rubika-only)
+        id: runbot
+        if: steps.guard.outputs.enabled == 'true'
+        env:
+          RUBIKA_BOT_TOKEN: ${{ secrets.RUBIKA_BOT_TOKEN }}
+          RUBIKA_CHANNEL_ID: ${{ secrets.RUBIKA_CHANNEL_ID }}
+          BOT_MAX_RUNTIME_MINUTES: ${{ inputs.runtime_minutes || '330' }}
+          PYTHONUNBUFFERED: '1'
+        run: python run_bot_cloud.py
+
+      - name: Save state to repository
+        if: ${{ !cancelled() && steps.guard.outputs.enabled == 'true' }}
+        continue-on-error: true
+        run: |
+          if [ ! -f state/bot_state.json ]; then
+            echo "No state file yet - nothing to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state/bot_state.json
+          if git diff --cached --quiet; then
+            echo "State unchanged."
+            exit 0
+          fi
+          git commit -m "chore: update bot state [skip ci]"
+          git pull --rebase --autostash origin "${{ github.ref_name }}"
+          git push origin "HEAD:${{ github.ref_name }}"
+
+      - name: Chain next shift
+        if: ${{ !cancelled() && steps.guard.outputs.enabled == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ steps.runbot.outcome }}" = "failure" ]; then
+            echo "Bot failed - waiting 5 minutes before restarting (backoff)..."
+            sleep 300
+          fi
+          gh workflow run rubika-bot.yml --ref "${{ github.ref_name }}"
+          echo "Next shift dispatched."

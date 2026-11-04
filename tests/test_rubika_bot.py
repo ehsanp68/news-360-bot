@@ -248,10 +248,15 @@ def test_config():
 async def main():
     test_config()
     runner, base_url = await start_mock_server()
+    old_state = bot_module.STATE_FILE
     try:
-        await test_client(base_url)
-        await test_smart_bot(base_url)
+        with tempfile.TemporaryDirectory() as tmp:
+            # وضعیت تست‌ها در پوشه موقت نوشته شود، نه داخل مخزن
+            bot_module.STATE_FILE = os.path.join(tmp, "bot_state.json")
+            await test_client(base_url)
+            await test_smart_bot(base_url)
     finally:
+        bot_module.STATE_FILE = old_state
         await runner.cleanup()
     print("\n🎉 ALL TESTS PASSED — Rubika-only pipeline works end-to-end")
 

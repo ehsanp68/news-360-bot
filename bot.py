@@ -67,6 +67,12 @@ RUBIKA_MAX_TEXT_LENGTH = 4000
 RUBIKA_MAX_CAPTION_LENGTH = 1000
 RUBIKA_MAX_MEDIA_BYTES = 20 * 1024 * 1024
 
+# ==================== وضعیت پایدار (برای اجرای ابری در GitHub Actions) ====================
+# بین نوبت‌های اجرا، لیست خبرهای ارسال‌شده ذخیره می‌شود تا خبر تکراری ارسال نشود.
+STATE_FILE = os.environ.get('BOT_STATE_FILE') or os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), 'state', 'bot_state.json')
+STATE_MAX_LINKS = 5000
+
 # ==================== ✅ نام الگوریتم‌ها ====================
 ALGORITHM_SMART_PRIORITY = "smart_priority"      # الگوریتم 1
 ALGORITHM_SOURCE_ROTATION = "source_rotation"    # الگوریتم 2
@@ -817,6 +823,9 @@ class SmartNewsBot:
         self.rotation_step = 0  # شمارنده مرحله فعلی
         self.rotation_cycle_length = len(SOURCE_ROTATION_CYCLE)
 
+        # ✅ بارگذاری وضعیت قبلی (برای جلوگیری از ارسال تکراری بعد از ری‌استارت)
+        self._load_state()
+
     def log(self, msg):
         print(msg)
         if self.log_callback:
@@ -914,6 +923,63 @@ class SmartNewsBot:
         self.sent_hashes.add(self._title_hash(title))
         if len(self.sent_titles) > 500:
             self.sent_titles = self.sent_titles[-500:]
+
+    # ==================== ذخیره/بارگذاری وضعیت (اجرای ابری) ====================
+    def _load_state(self):
+        """بارگذاری وضعیت قبلی تا بعد از ری‌استارت، خبر تکراری ارسال نشود"""
+        try:
+            with open(STATE_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except FileNotFoundError:
+            return
+        except Exception as e:
+            self.log(f'⚠️ State load failed: {e}')
+            return
+        self.sent_links = set(data.get('sent_links', []))
+        self.sent_titles = list(data.get('sent_titles', []))[-500:]
+        self.sent_hashes = set(data.get('sent_hashes', []))
+        self.daily_posts = int(data.get('daily_posts', 0))
+        self.daily_international_posts = int(data.get('daily_international_posts', 0))
+        try:
+            self.last_reset_date = datetime.fromisoformat(
+                data.get('last_reset_date', '')).date()
+        except Exception:
+            pass
+        for key in ('total_fetched', 'total_duplicates', 'total_videos_posted',
+                    'total_international_fetched', 'total_filtered_provinces',
+                    'total_breaking_posted'):
+            setattr(self, key, int(data.get(key, 0)))
+        self.source_stats = dict(data.get('source_stats', {}))
+        self.log(f'📂 State loaded: {len(self.sent_links)} sent links (جلوگیری از ارسال تکراری)')
+
+    def _save_state(self):
+        """ذخیره وضعیت به صورت اتمیک (فایل موقت ← جایگزینی)"""
+        try:
+            state_dir = os.path.dirname(STATE_FILE)
+            if state_dir:
+                os.makedirs(state_dir, exist_ok=True)
+            data = {
+                'sent_links': list(self.sent_links)[-STATE_MAX_LINKS:],
+                'sent_titles': self.sent_titles[-500:],
+                'sent_hashes': list(self.sent_hashes)[-STATE_MAX_LINKS:],
+                'daily_posts': self.daily_posts,
+                'daily_international_posts': self.daily_international_posts,
+                'last_reset_date': self.last_reset_date.isoformat(),
+                'total_fetched': self.total_fetched,
+                'total_duplicates': self.total_duplicates,
+                'total_videos_posted': self.total_videos_posted,
+                'total_international_fetched': self.total_international_fetched,
+                'total_filtered_provinces': self.total_filtered_provinces,
+                'total_breaking_posted': self.total_breaking_posted,
+                'source_stats': self.source_stats,
+                'updated_at': datetime.now().isoformat(),
+            }
+            tmp_file = STATE_FILE + '.tmp'
+            with open(tmp_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False)
+            os.replace(tmp_file, STATE_FILE)
+        except Exception as e:
+            self.log(f'⚠️ State save failed: {e}')
 
     def _detect_category(self, title, summary=''):
         text = (title + ' ' + summary).lower()
@@ -1334,6 +1400,7 @@ class SmartNewsBot:
             self.daily_posts += 1
             self.hourly_posts += 1
             self.total_breaking_posted += 1
+            self._save_state()
             self.log(f'🚨 BREAKING SENT: {news["title"][:60]}...')
             return True
         except Exception as e:
@@ -1401,6 +1468,7 @@ class SmartNewsBot:
             self._mark_sent(news.get('title', news.get('title_en', '')))
             self.daily_posts += 1
             self.hourly_posts += 1
+            self._save_state()
             self.log(f'🔥 VIRAL SENT: {news.get("title", news.get("title_en", ""))[:50]}...')
             return True
         except Exception as e:
@@ -1446,6 +1514,7 @@ class SmartNewsBot:
             self._mark_sent(news['title'])
             self.daily_posts += 1
             self.hourly_posts += 1
+            self._save_state()
             self.log(f'✅ [{news["category"]}] {news["title"][:50]}...')
             return True
         except Exception as e:
@@ -1510,6 +1579,7 @@ class SmartNewsBot:
             self.daily_international_posts += 1
             self.daily_posts += 1
             self.hourly_posts += 1
+            self._save_state()
             self.log(f'✅ [🌍 {cat}] {t_title[:50]}...')
             return True
         except Exception as e:
@@ -1717,7 +1787,7 @@ class SmartNewsBot:
             self.log(f'❌ Rubika connection failed: {e}')
             self.log('❌ توکن ربات و دسترسی اینترنت را بررسی کنید')
             await self.bot.close()
-            return
+            return False
         
         self.is_running = True
         self.cycle_count += 1
@@ -1740,9 +1810,11 @@ class SmartNewsBot:
             traceback.print_exc()
         finally:
             self.rubika_connected = False
+            self._save_state()
             await self.bot.close()
         
         self.log('🛑 Bot stopped')
+        return True
 
     def stop(self):
         self.is_running = False

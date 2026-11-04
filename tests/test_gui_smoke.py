@@ -105,9 +105,11 @@ def main():
 
     # ذخیره تنظیمات از طریق GUI
     old_file = bot_module.CONFIG_FILE
+    old_state = bot_module.STATE_FILE
     try:
         with tempfile.TemporaryDirectory() as tmp:
             bot_module.CONFIG_FILE = os.path.join(tmp, "rubika_config.json")
+            bot_module.STATE_FILE = os.path.join(tmp, "bot_state.json")
             app.rubika_token_var.set("my-rubika-token")
             app.rubika_channel_var.set("@news360_24")
             app.save_rubika_settings()
@@ -153,6 +155,7 @@ def main():
             print("✅ Platform indicator follows real Rubika connection state")
     finally:
         bot_module.CONFIG_FILE = old_file
+        bot_module.STATE_FILE = old_state
 
     print("\n🎉 GUI SMOKE TEST PASSED — Rubika-only UI is wired correctly")
 
