@@ -101,6 +101,15 @@ def main():
         "لیست RSS باید فقط منابع داخلی باشد"
     print("✅ Platform status contains ONLY Rubika; RSS list is domestic-only")
 
+    # Smart Priority باید از GUI حذف شده باشد؛ فقط پنل Source Rotation بماند
+    assert not hasattr(app, "select_algorithm"), "انتخابگر الگوریتم باید حذف شده باشد"
+    assert not hasattr(app, "btn_algo1") and not hasattr(app, "btn_algo2")
+    assert not hasattr(app, "current_algorithm")
+    assert not hasattr(bot_module, "ALGORITHM_SMART_PRIORITY")
+    assert hasattr(app, "create_algorithm_section")
+    assert app.algorithm_info_label is not None and app.step_display_label is not None
+    print("✅ GUI shows single Source Rotation panel (no algorithm selector)")
+
     # ویجت‌های تنظیمات روبیکا ساخته شده‌اند
     assert hasattr(app, "rubika_token_var") and hasattr(app, "rubika_channel_var")
     assert hasattr(app, "token_entry") and hasattr(app, "channel_entry")

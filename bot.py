@@ -1,9 +1,9 @@
 """
-Rubika News Bot - Dual Algorithm System
-✅ Algorithm 1: Smart Priority (الگوریتم هوشمند اولویت‌دار)
-✅ Algorithm 2: Source Rotation (الگوریتم چرخش منبع)
-✅ Viral Detection
-✅ Source Diversity
+Rubika News Bot - Source Rotation
+✅ الگوریتم انتشار: Source Rotation (چرخش منبع) - تنها الگوریتم انتشار
+✅ سبک خبری روی همه خبرها (اعداد فارسی، نگارش صحیح، پاک‌سازی متن)
+✅ تشخیص دقیق خبر فوری 🚨 (امتیازدهی وزنی + گارد تکذیب)
+✅ تشخیص دقیق خبر وایرال 🔥 (چندمنبعی + پنجره زمانی + گارد اعداد)
 ✅ انتشار فقط و فقط در کانال روبیکا (Rubika-only publishing)
 ✅ فقط منابع خبری داخلی - بدون لینک خبر در پست‌ها
 """
@@ -71,9 +71,8 @@ STATE_FILE = os.environ.get('BOT_STATE_FILE') or os.path.join(
     os.path.dirname(os.path.abspath(__file__)), 'state', 'bot_state.json')
 STATE_MAX_LINKS = 5000
 
-# ==================== ✅ نام الگوریتم‌ها ====================
-ALGORITHM_SMART_PRIORITY = "smart_priority"      # الگوریتم 1
-ALGORITHM_SOURCE_ROTATION = "source_rotation"    # الگوریتم 2
+# ==================== ✅ الگوریتم انتشار (تک‌الگوریتم) ====================
+ALGORITHM_SOURCE_ROTATION = "source_rotation"    # تنها الگوریتم انتشار: چرخش منبع
 
 # ==================== منابع خبری ====================
 NEWS_SOURCES = {
@@ -90,7 +89,7 @@ FETCH_INTERVAL = 30 * 60
 MIN_POST_DELAY = 120
 MAX_POST_DELAY = 200
 
-# ==================== ✅ الگوریتم 2: چرخش منبع ====================
+# ==================== ✅ چرخش منبع (الگوریتم انتشار) ====================
 # ساختار بهینه: (نوع, منبع, بازه_انتظار)
 # نوع: 'publish' = انتشار خبر | 'wait' = انتظار
 SOURCE_ROTATION_CYCLE = [
@@ -119,36 +118,24 @@ INCLUDE_IMAGES = True
 INCLUDE_VIDEOS = True
 SUMMARY_WORDS = 90
 
-# ==================== تنظیمات وایرال ====================
-VIRAL_SIMILARITY_THRESHOLD = 0.55
-VIRAL_SOURCES_MIN = 2
+# ==================== ✍️ سبک خبری (اعمال روی همه خبرها) ====================
+NEWS_STYLE_ENABLED = True
+_DIGITS_TO_FA = str.maketrans('0123456789' + '٠١٢٣٤٥٦٧٨٩', '۰۱۲۳۴۵۶۷۸۹' * 2)
+_DIGITS_TO_EN = str.maketrans('۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩', '0123456789' * 2)
+
+# ==================== 🔥 تنظیمات وایرال (تشخیص دقیق) ====================
+# وایرال = بازتاب یک رویداد در حداقل ۲ منبع دیگر، در پنجره زمانی مشخص،
+# با شباهت معنایی بالا (نرمال‌سازی ی/ک، نیم‌فاصله، حذف کلمات اضافی)
+VIRAL_SIMILARITY_THRESHOLD = 0.65   # آستانه شباهت (ترکیب توالی + اشتراک کلمات)
+VIRAL_SOURCES_MIN = 2               # حداقل تعداد منابع دیگر
+VIRAL_TIME_WINDOW_HOURS = 6         # فقط خبرهای ۶ ساعت اخیر مقایسه می‌شوند
+VIRAL_MAX_TITLES_PER_SOURCE = 80    # سقف عنوان‌های نگهداری‌شده per منبع
+VIRAL_MIN_SHARED_TOKENS = 3         # اشتراک ≥۳ کلمه کلیدی → تقویت شباهت
+VIRAL_SHARED_TOKEN_BONUS = 0.1
 VIRAL_KEYWORDS_FA = [
-    'فوری', 'breaking', 'واکنش', 'جنجال', 'بحران', 'شوکه',
+    'فوری', 'واکنش', 'جنجال', 'بحران', 'شوکه',
     'تکان‌دهنده', 'اعتراض', 'آشوب', 'شورش', 'استعفا', 'برکناری',
     'ترور', 'اعدام', 'درگیری', 'محاکمه', 'فساد',
-]
-VIRAL_KEYWORDS_EN = [
-    'breaking', 'shocking', 'crisis', 'outrage', 'chaos', 'riot',
-    'protest', 'resignation', 'assassination', 'scandal', 'controversy',
-    'bombshell', 'exclusive', 'alert', 'urgent', 'just in',
-]
-
-# ==================== الگوریتم 1: Smart Priority ====================
-PUBLISH_CYCLE_SLOTS = [
-    {'type': 'breaking', 'weight': 2},
-    {'type': 'breaking', 'weight': 2},
-    {'type': 'viral', 'weight': 4},
-    {'type': 'viral', 'weight': 4},
-    {'type': 'viral', 'weight': 4},
-    {'type': 'viral', 'weight': 4},
-    {'type': 'domestic', 'category': 'سیاسی', 'weight': 4},
-    {'type': 'domestic', 'category': 'اقتصادی', 'weight': 4},
-    {'type': 'domestic', 'category': 'حوادث', 'weight': 4},
-    {'type': 'domestic', 'category': 'بین‌الملل', 'weight': 4},
-    {'type': 'domestic', 'category': 'ورزشی', 'weight': 4},
-    {'type': 'domestic', 'category': 'بهداشت', 'weight': 4},
-    {'type': 'domestic', 'category': 'فناوری', 'weight': 4},
-    {'type': 'domestic', 'category': 'عمومی', 'weight': 4},
 ]
 
 # ==================== تنظیمات مخزن ====================
@@ -186,21 +173,34 @@ ALLOWED_REGIONS = [
     'محمدشهر', 'کمالشهر', 'گلستان', 'اندیشه'
 ]
 
-# ==================== Breaking News ====================
-BREAKING_KEYWORDS_FA = [
+# ==================== 🚨 تشخیص خبر فوری (امتیازدهی دقیق) ====================
+# منطق: عبارت‌های قطعی → فوری فوری؛ در غیر این صورت امتیاز وزنی:
+#   کلیدواژه قوی در عنوان = ۳ | در خلاصه = ۲
+#   کلیدواژه پشتیبان در عنوان = ۲ | در خلاصه = ۱
+#   امتیاز ≥ آستانه → فوری | وجود عبارت تکذیب در عنوان → هرگز فوری نیست
+BREAKING_INSTANT_PHRASES = [
     'حمله به ایران', 'حمله آمریکا به ایران', 'حمله اسرائیل به ایران',
-    'بمباران ایران', 'موشک به ایران', 'جنگ با ایران', 'حمله به تهران',
-    'حمله هوایی به ایران', 'ضربه به ایران', 'اسرائیل ایران را بمباران',
-    'آمریکا ایران را بمباران', 'آمریکا به ایران حمله', 'اسرائیل به ایران حمله',
-    'ایران مورد حمله', 'حمله نظامی به ایران',
+    'بمباران ایران', 'حمله به تهران', 'موشک‌باران', 'موشک باران',
+    'جنگ با ایران', 'ایران مورد حمله', 'حمله نظامی به ایران',
+    'حمله موشکی', 'حمله پهپادی', 'اعلام جنگ', 'کودتا', 'ترور',
+    'حکومت نظامی', 'زلزله شدید', 'زلزله مهیب', 'سقوط هواپیما',
+    'انفجار مهیب', 'حمله تروریستی', 'گروگان‌گیری گسترده',
 ]
-
-BREAKING_KEYWORDS_EN = [
-    'attack on iran', 'us attacks iran', 'israel attacks iran',
-    'iran attacked', 'iran bombed', 'bombing iran', 'missile strike iran',
-    'airstrike iran', 'airstrike on iran', 'war with iran', 'strike on iran',
-    'us strikes iran', 'israel strikes iran', 'iran under attack', 'military strike iran',
+BREAKING_STRONG_KEYWORDS = [
+    'بمباران', 'حمله هوایی', 'حمله سایبری گسترده', 'انفجار', 'زلزله',
+    'سیل گسترده', 'تیراندازی', 'سقوط', 'آتش‌سوزی گسترده',
+    'قطع سراسری', 'تخلیه اضطراری',
 ]
+BREAKING_SUPPORT_KEYWORDS = [
+    'فوری', 'عاجل', 'همین حالا', 'اضطراری', 'بحران',
+    'هشدار قرمز', 'کشته', 'مجروح', 'زخمی',
+    'وضعیت قرمز', 'تعطیلی سراسری',
+]
+BREAKING_NEGATION_KEYWORDS = [
+    'تکذیب', 'شایعه', 'کذب', 'صحت ندارد', 'جعلی', 'رد شد', 'انکار', 'نادرست',
+]
+BREAKING_SCORE_THRESHOLD = 4
+BREAKING_EARTHQUAKE_MIN_MAGNITUDE = 5.0   # زلزله ≥۵ ریشتر → فوری
 
 # ==================== دسته‌بندی ====================
 NEWS_CATEGORIES = {
@@ -371,9 +371,6 @@ class BalancedNewsPool:
         self.viral_queue = []
 
         self.last_domestic_source = None
-        self.last_domestic_category = None
-        self.cycle_index = 0
-        self.cycle_slots = PUBLISH_CYCLE_SLOTS
         self.recent_titles_by_source = {}
         self.max_pool_size = MAX_POOL_SIZE
         self.auto_cleanup_threshold = AUTO_CLEANUP_THRESHOLD
@@ -392,26 +389,57 @@ class BalancedNewsPool:
             except:
                 pass
 
+    def _viral_tokens(self, title):
+        """نرمال‌سازی عنوان برای مقایسه وایرال (ی/ک عربی، نیم‌فاصله، کلمات اضافی)"""
+        text = (title or '').lower().replace('ي', 'ی').replace('ك', 'ک')
+        text = text.replace('\u200c', ' ')
+        text = re.sub(r'[^\w\s]', ' ', text)
+        return [w for w in text.split()
+                if (len(w) > 1 or w.isdigit()) and w not in COMMON_WORDS_TO_IGNORE]
+
+    def _viral_similarity(self, tokens_a, tokens_b):
+        """شباهت دقیق: ترکیب SequenceMatcher و Jaccard + گارد اعداد متفاوت"""
+        if not tokens_a or not tokens_b:
+            return 0.0
+        set_a, set_b = set(tokens_a), set(tokens_b)
+        shared = set_a & set_b
+        # گارد اعداد: اگر هر دو عنوان عدد دارند ولی هیچ عدد مشترکی ندارند،
+        # رویدادها متفاوت‌اند (مثلاً زلزله ۳ ریشتری vs ۶ ریشتری)
+        nums_a = {t for t in set_a if any(ch.isdigit() for ch in t)}
+        nums_b = {t for t in set_b if any(ch.isdigit() for ch in t)}
+        if nums_a and nums_b and not (nums_a & nums_b):
+            return 0.0
+        seq = SequenceMatcher(None, ' '.join(tokens_a), ' '.join(tokens_b)).ratio()
+        jaccard = len(shared) / len(set_a | set_b)
+        sim = (seq + jaccard) / 2
+        if len(shared) >= VIRAL_MIN_SHARED_TOKENS:
+            sim += VIRAL_SHARED_TOKEN_BONUS
+        return min(sim, 1.0)
+
     def check_and_mark_viral(self, title, source):
-        normalized = re.sub(r'[^\w\s]', '', title.lower().strip())
-        normalized = re.sub(r'\s+', ' ', normalized)
+        """🔥 وایرال = بازتاب همان رویداد در ≥۲ منبع دیگر در پنجره زمانی"""
+        now = datetime.now()
+        cutoff = now - timedelta(hours=VIRAL_TIME_WINDOW_HOURS)
+        tokens = self._viral_tokens(title)
         if source not in self.recent_titles_by_source:
             self.recent_titles_by_source[source] = []
-        viral_count = 0
-        for other_source, titles in self.recent_titles_by_source.items():
+        # فقط عنوان‌های داخل پنجره زمانی نگه داشته می‌شوند
+        entries = [e for e in self.recent_titles_by_source[source] if e[2] > cutoff]
+        matched_sources = 0
+        for other_source, other_entries in self.recent_titles_by_source.items():
             if other_source == source:
                 continue
-            for other_title in titles:
-                other_norm = re.sub(r'[^\w\s]', '', other_title.lower().strip())
-                other_norm = re.sub(r'\s+', ' ', other_norm)
-                sim = SequenceMatcher(None, normalized, other_norm).ratio()
-                if sim >= VIRAL_SIMILARITY_THRESHOLD:
-                    viral_count += 1
+            for (_t, other_tokens, ts) in other_entries:
+                if ts <= cutoff:
+                    continue
+                if self._viral_similarity(tokens, other_tokens) >= VIRAL_SIMILARITY_THRESHOLD:
+                    matched_sources += 1
                     break
-        self.recent_titles_by_source[source].append(title)
-        if len(self.recent_titles_by_source[source]) > 50:
-            self.recent_titles_by_source[source] = self.recent_titles_by_source[source][-50:]
-        return viral_count >= VIRAL_SOURCES_MIN
+        # ثبت عنوان (بدون تکرار عنوان یکسان از همان منبع)
+        if not any(e[0] == title for e in entries):
+            entries.append((title, tokens, now))
+        self.recent_titles_by_source[source] = entries[-VIRAL_MAX_TITLES_PER_SOURCE:]
+        return matched_sources >= VIRAL_SOURCES_MIN
 
     def smart_cleanup(self, force=False):
         current_size = self.size()
@@ -462,6 +490,9 @@ class BalancedNewsPool:
             score += 30
         if cat in ['اقتصادی', 'حوادث']:
             score += 15
+        title_l = item.get('title', '').lower()
+        if any(kw in title_l for kw in VIRAL_KEYWORDS_FA):
+            score += 10
         item['viral_score'] = score
         self.viral_queue.append(item)
         self.viral_queue.sort(key=lambda x: x.get('viral_score', 0), reverse=True)
@@ -482,42 +513,10 @@ class BalancedNewsPool:
             self.domestic_news[cat] = []
         self.domestic_news[cat].append(item)
 
-    def get_next_domestic(self, preferred_category=None, avoid_source=None):
-        if preferred_category:
-            categories = [preferred_category] + [
-                c for c in self.domestic_news.keys() if c != preferred_category
-            ]
-        else:
-            categories = sorted(
-                self.domestic_news.keys(),
-                key=lambda c: (
-                    NEWS_CATEGORIES.get(c, DEFAULT_CATEGORY)['priority'],
-                    -len(self.domestic_news.get(c, []))
-                )
-            )
-        for cat in categories:
-            items = self.domestic_news.get(cat, [])
-            if not items:
-                continue
-            for i, item in enumerate(items):
-                if item.get('source') != avoid_source:
-                    self.domestic_news[cat].pop(i)
-                    self.domestic_post_count[cat] += 1
-                    self.last_domestic_source = item.get('source')
-                    self.last_domestic_category = cat
-                    return item
-            if items:
-                item = items.pop(0)
-                self.domestic_post_count[cat] += 1
-                self.last_domestic_source = item.get('source')
-                self.last_domestic_category = cat
-                return item
-        return None
-
     def domestic_size(self):
         return sum(len(v) for v in self.domestic_news.values())
 
-    # ==================== ✅ متد جدید برای الگوریتم 2 ====================
+    # ==================== ✅ دریافت خبر از منبع مشخص (چرخش منبع) ====================
     def get_next_from_source(self, source_name):
         """✅ دریافت اولین خبر از منبع مشخص (برای الگوریتم چرخش منبع)
         
@@ -541,38 +540,6 @@ class BalancedNewsPool:
                     self.last_domestic_source = source_name
                     return item, 'domestic'
         
-        return None, None
-
-    # ==================== الگوریتم 1: Smart Priority ====================
-    def get_next_slot(self):
-        slot = self.cycle_slots[self.cycle_index % len(self.cycle_slots)]
-        self.cycle_index += 1
-        return slot
-
-    def get_next_by_cycle(self):
-        slot = self.get_next_slot()
-        slot_type = slot.get('type')
-        if self.has_breaking():
-            return self.get_next_breaking(), 'breaking'
-        if slot_type == 'viral' and self.has_viral():
-            return self.get_next_viral(), 'viral'
-        if slot_type == 'domestic':
-            preferred_cat = slot.get('category')
-            item = self.get_next_domestic(
-                preferred_category=preferred_cat,
-                avoid_source=self.last_domestic_source
-            )
-            if item:
-                return item, 'domestic'
-            item = self.get_next_domestic(avoid_source=self.last_domestic_source)
-            if item:
-                return item, 'domestic'
-        if self.has_viral():
-            return self.get_next_viral(), 'viral'
-        if self.domestic_size() > 0:
-            item = self.get_next_domestic(avoid_source=self.last_domestic_source)
-            if item:
-                return item, 'domestic'
         return None, None
 
     def size(self):
@@ -622,10 +589,7 @@ class SmartNewsBot:
         self.news_pool.set_log_callback(log_callback)
 
 
-        # ✅ ✅ ✅ تنظیمات الگوریتم‌ها
-        self.current_algorithm = ALGORITHM_SMART_PRIORITY  # الگوریتم پیش‌فرض
-        
-        # ✅ متغیرهای الگوریتم 2: Source Rotation
+        # ✅ الگوریتم انتشار: Source Rotation (تنها الگوریتم)
         self.rotation_step = 0  # شمارنده مرحله فعلی
         self.rotation_cycle_length = len(SOURCE_ROTATION_CYCLE)
 
@@ -640,32 +604,9 @@ class SmartNewsBot:
             except:
                 pass
 
-    # ==================== ✅ مدیریت الگوریتم‌ها ====================
-    def set_algorithm(self, algorithm_name):
-        """تغییر الگوریتم انتشار"""
-        if algorithm_name in [ALGORITHM_SMART_PRIORITY, ALGORITHM_SOURCE_ROTATION]:
-            self.current_algorithm = algorithm_name
-            if algorithm_name == ALGORITHM_SOURCE_ROTATION:
-                self.rotation_step = 0
-                self.log(f"🔄 الگوریتم تغییر کرد: Source Rotation")
-            else:
-                self.log(f"🔄 الگوریتم تغییر کرد: Smart Priority")
-            return True
-        return False
-
-    def get_algorithm_name(self):
-        """دریافت نام قابل نمایش الگوریتم فعلی"""
-        if self.current_algorithm == ALGORITHM_SMART_PRIORITY:
-            return "Smart Priority"
-        elif self.current_algorithm == ALGORITHM_SOURCE_ROTATION:
-            return "Source Rotation"
-        return "Unknown"
-
+    # ==================== ✅ اطلاعات الگوریتم انتشار ====================
     def get_current_step_info(self):
-        """✅ دریافت اطلاعات مرحله فعلی (برای UI)"""
-        if self.current_algorithm != ALGORITHM_SOURCE_ROTATION:
-            return None
-        
+        """✅ دریافت اطلاعات مرحله فعلی چرخش منبع (برای UI)"""
         step_type, source, wait_range = SOURCE_ROTATION_CYCLE[self.rotation_step]
         step_number = self.rotation_step + 1  # شماره مرحله (1-based)
         
@@ -688,15 +629,50 @@ class SmartNewsBot:
                 return True
         return False
 
+    def _normalize_for_match(self, text):
+        """نرمال‌سازی متن برای تطبیق کلیدواژه (ی/ک عربی + نیم‌فاصله)"""
+        text = (text or '').lower().replace('ي', 'ی').replace('ك', 'ک')
+        text = text.replace('\u200c', ' ')
+        return re.sub(r'\s+', ' ', text).strip()
+
+    def _breaking_score(self, title, summary=''):
+        """🚨 امتیاز فوریت: عبارت قطعی → ۱۰ | زلزله ≥۵ ریشتر → ۱۰۰ | وگرنه امتیاز وزنی"""
+        t = self._normalize_for_match(title)
+        s = self._normalize_for_match(summary)
+        # گارد تکذیب: خبر تکذیب‌شده/شایعه هرگز فوری نیست
+        if any(neg in t for neg in BREAKING_NEGATION_KEYWORDS):
+            return 0
+        # عبارت‌های قطعی در عنوان → فوری فوری
+        for phrase in BREAKING_INSTANT_PHRASES:
+            if self._normalize_for_match(phrase) in t:
+                return 100
+        # زلزله با بزرگی ≥۵ ریشتر (در عنوان یا خلاصه) → فوری
+        m = re.search(r'([0-9۰-۹٠-٩]+(?:[.,٫][0-9۰-۹٠-٩]+)?)\s*ریشتر', t + ' ' + s)
+        if m:
+            try:
+                magnitude = float(m.group(1).translate(_DIGITS_TO_EN).replace('٫', '.').replace(',', '.'))
+                if magnitude >= BREAKING_EARTHQUAKE_MIN_MAGNITUDE:
+                    return 100
+            except ValueError:
+                pass
+        score = 0
+        for kw in BREAKING_STRONG_KEYWORDS:
+            k = self._normalize_for_match(kw)
+            if k in t:
+                score += 3
+            elif k in s:
+                score += 2
+        for kw in BREAKING_SUPPORT_KEYWORDS:
+            k = self._normalize_for_match(kw)
+            if k in t:
+                score += 2
+            elif k in s:
+                score += 1
+        return score
+
     def _is_breaking_news(self, title, summary=''):
-        text = (title + ' ' + summary).lower()
-        for kw in BREAKING_KEYWORDS_FA:
-            if kw in text:
-                return True
-        for kw in BREAKING_KEYWORDS_EN:
-            if kw in text:
-                return True
-        return False
+        """🚨 تشخیص خبر فوری با امتیازدهی دقیق (کاهش مثبت/منفی کاذب)"""
+        return self._breaking_score(title, summary) >= BREAKING_SCORE_THRESHOLD
 
     def _normalize(self, text):
         text = re.sub(r'[?!.,،؛:\-_»«\"\'\{\}\[\]\(\)]', ' ', text)
@@ -795,6 +771,56 @@ class SmartNewsBot:
             return best, NEWS_CATEGORIES[best]['emoji']
         return DEFAULT_CATEGORY['name'], DEFAULT_CATEGORY['emoji']
 
+    # ==================== ✍️ سبک خبری (اعمال روی همه خبرها) ====================
+    def _style_normalize_chars(self, text):
+        """اعداد فارسی ۰-۹ + ی/ک فارسی + حذف کشیده + نیم‌فاصله استاندارد"""
+        text = text.translate(_DIGITS_TO_FA)
+        text = text.replace('ي', 'ی').replace('ك', 'ک')
+        text = text.replace('ـ', '')  # کشیده (tatweel)
+        text = re.sub(r'\b(می|نمی)\s+', r'\1' + '\u200c', text)          # می رود → می‌رود
+        text = re.sub(r'(\w)\s+(ها|های|هایی)\b', '\\1\u200c\\2', text)     # کتاب ها → کتاب‌ها
+        return text
+
+    def _style_fix_punctuation(self, text):
+        """نشانه‌گذاری فارسی: ، ؛ ؟ + فاصله‌گذاری صحیح"""
+        text = text.replace(';', '؛').replace('?', '؟')
+        text = re.sub(r'(?<=\d),(?=\d)', '٬', text)   # جداکننده هزارگان
+        text = text.replace(',', '،')
+        text = re.sub(r'\s+([،؛؟!:.])', r'\1', text)               # حذف فاصله قبل نشانه
+        text = re.sub(r'([،؛؟!:])(?=[^\s\d])', r'\1 ', text)       # یک فاصله بعد نشانه
+        text = re.sub(r'\.(?=[^\s\d.])', '. ', text)              # فاصله بعد نقطه (نه اعشار/سه‌نقطه)
+        text = re.sub(r'!{2,}', '!', text)
+        text = re.sub(r'؟{2,}', '؟', text)
+        text = re.sub(r'([؟!])\s*!+', r'\1', text)   # ؟! → ؟
+        return text
+
+    def _style_remove_extra_words(self, text):
+        """حذف تکرار کلمات و فاصله‌های اضافی"""
+        text = re.sub(r'(\S+)\s+\1(?=\s|$)', r'\1', text)
+        return re.sub(r'\s+', ' ', text).strip()
+
+    def _style_title(self, title):
+        """عنوان خبری: بدون نقطه/دونقطه پایانی، بدون فاصله اضافی"""
+        title = title.strip().strip('«»"').strip()
+        title = re.sub(r'\s+', ' ', title)
+        return title.rstrip('.:،؛').rstrip()
+
+    def _style_summary(self, text):
+        """خلاصه خبری: پایان با نقطه (بدون تغییر محتوا)"""
+        text = text.strip()
+        if text and text[-1] not in '.؟!…':
+            text += '.'
+        return text
+
+    def _news_style(self, text, is_title=False):
+        """✍️ اعمال سبک خبری روی متن - idempotent (اجرای چندباره بی‌اثر)"""
+        if not text or not NEWS_STYLE_ENABLED:
+            return text
+        result = self._style_normalize_chars(text)
+        result = self._style_fix_punctuation(result)
+        result = self._style_remove_extra_words(result)
+        return self._style_title(result) if is_title else self._style_summary(result)
+
     def _summarize(self, text, n=50):
         try:
             text = BeautifulSoup(text, 'html.parser').get_text()
@@ -858,7 +884,7 @@ class SmartNewsBot:
                 self.rss_health_check[source] = 'slow' if response_time > 3000 else 'online'
                 s_new = s_brk = 0
                 for entry in feed.entries[:15]:
-                    title = getattr(entry, 'title', '').strip()
+                    title = self._news_style(getattr(entry, 'title', '').strip(), is_title=True)
                     link = entry.get('link', '')
                     if not title:
                         continue
@@ -867,7 +893,7 @@ class SmartNewsBot:
                         n_dup += 1
                         continue
                     cycle_hashes.add(th)
-                    summary = self._summarize(entry.get('summary', entry.get('description', '')), SUMMARY_WORDS)
+                    summary = self._news_style(self._summarize(entry.get('summary', entry.get('description', '')), SUMMARY_WORDS))
                     if self._should_filter_province(title, summary):
                         continue
                     cat, emoji = self._detect_category(title, summary)
@@ -926,8 +952,8 @@ class SmartNewsBot:
     # ==================== قالب پیام (متن ساده برای روبیکا) ====================
     async def _format(self, news):
         source = news.get('source', '')
-        title = news.get('title', '')
-        summary = news.get('summary', '')
+        title = self._news_style(news.get('title', ''), is_title=True)
+        summary = self._news_style(news.get('summary', ''))
         emoji = news.get('emoji', '📰')
         header = '🔴 🚨🚨 خبر فوری\n\n' if news.get('is_breaking') else ''
         return (
@@ -939,8 +965,8 @@ class SmartNewsBot:
 
     def _format_viral(self, news):
         source = news.get('source', '')
-        title = news.get('title', '')
-        summary = news.get('summary', '')
+        title = self._news_style(news.get('title', ''), is_title=True)
+        summary = self._news_style(news.get('summary', ''))
         emoji = news.get('emoji', '🔥')
         header = '🔴 🔥🔥 خبر وایرال - بازتاب گسترده\n\n'
         return (
@@ -1058,64 +1084,14 @@ class SmartNewsBot:
             return False
 
     # ==================== ✅ الگوریتم 1: Smart Priority Loop ====================
-    async def publish_loop_smart_priority(self):
-        """✅ الگوریتم 1: Smart Priority (بدون تغییر)"""
-        self.log('🔄 🧠 SMART PRIORITY LOOP STARTED\n')
-        while self.is_running:
-            # ✅ بررسی تغییر الگوریتم
-            if self.current_algorithm != ALGORITHM_SMART_PRIORITY:
-                self.log(f'🔄 Switching to: {self.get_algorithm_name()}')
-                return
-
-            if self.news_pool.has_breaking():
-                brk = self.news_pool.get_next_breaking()
-                self.log('\n🚨🚨🚨 BREAKING NEWS! 🚨🚨🚨')
-                await self._send_breaking(brk)
-                await asyncio.sleep(5)
-                continue
-            now = datetime.now()
-            if self.last_fetch_time is None or \
-               (now - self.last_fetch_time).total_seconds() >= self.fetch_interval:
-                self.cycle_count += 1
-                self.log(f'\n⏰ FETCH TIME! Cycle #{self.cycle_count}')
-                await self.fetch_all_news()
-                self.next_fetch_time = now + timedelta(seconds=self.fetch_interval)
-            if self.news_pool.size() == 0:
-                rem = self._secs_to_fetch()
-                self.log(f'💤 Pool empty | next fetch: {rem//60}m {rem%60:02d}s')
-                await asyncio.sleep(30)
-                continue
-            news, news_type = self.news_pool.get_next_by_cycle()
-            if news is None:
-                await asyncio.sleep(10)
-                continue
-            sent = False
-            if news_type == 'breaking':
-                sent = await self._send_breaking(news)
-            elif news_type == 'viral':
-                sent = await self._send_viral(news)
-            elif news_type == 'domestic':
-                sent = await self._send_domestic_direct(news)
-            if not sent:
-                continue
-            delay = random.randint(MIN_POST_DELAY, MAX_POST_DELAY)
-            self.log(f'⏸️ Next post in {delay//60}m {delay%60}s...')
-            for _ in range(delay):
-                if not self.is_running:
-                    return
-                if self.current_algorithm != ALGORITHM_SMART_PRIORITY:
-                    return
-                if self.news_pool.has_breaking():
-                    self.log('🚨 Breaking interrupts!')
-                    break
-                await asyncio.sleep(1)
-
-    # ==================== ✅ الگوریتم 2: Source Rotation Loop ====================
+    # ==================== ✅ حلقه انتشار: Source Rotation ====================
     async def publish_loop_source_rotation(self):
-        """✅ الگوریتم 2: Source Rotation (چرخش منبع)
+        """✅ الگوریتم انتشار: Source Rotation (چرخش منبع) - تنها الگوریتم
         
-        ساختار بهینه:
-        - حلقه روی SOURCE_ROTATION_CYCLE
+        ساختار:
+        - خبر فوری 🚨 همیشه اولویت اول دارد
+        - خبر وایرال 🔥 در اولویت دوم منتشر می‌شود
+        - سپس حلقه روی SOURCE_ROTATION_CYCLE
         - اگر خبری از منبع نبود: step += 2 (رد کردن مرحله انتظار)
         - اگر خبری بود: step += 1 (حرکت به مرحله انتظار)
         - در پایان چرخه: بازگشت به مرحله 0
@@ -1124,16 +1100,19 @@ class SmartNewsBot:
         self.log(f'📋 Cycle length: {self.rotation_cycle_length} steps')
         
         while self.is_running:
-            # ✅ بررسی تغییر الگوریتم
-            if self.current_algorithm != ALGORITHM_SOURCE_ROTATION:
-                self.log(f'🔄 Switching to: {self.get_algorithm_name()}')
-                return
-
-            # ✅ Breaking News همیشه اولویت دارد
+            # ✅ خبر فوری همیشه اولویت دارد
             if self.news_pool.has_breaking():
                 brk = self.news_pool.get_next_breaking()
                 self.log('\n🚨🚨🚨 BREAKING NEWS! 🚨🚨🚨')
                 await self._send_breaking(brk)
+                await asyncio.sleep(5)
+                continue
+
+            # ✅ خبر وایرال در اولویت دوم (بازتاب گسترده = حساس به زمان)
+            if self.news_pool.has_viral():
+                viral = self.news_pool.get_next_viral()
+                self.log('\n🔥🔥 VIRAL NEWS! 🔥')
+                await self._send_viral(viral)
                 await asyncio.sleep(5)
                 continue
 
@@ -1206,10 +1185,8 @@ class SmartNewsBot:
                 for _ in range(wait_seconds):
                     if not self.is_running:
                         return
-                    if self.current_algorithm != ALGORITHM_SOURCE_ROTATION:
-                        return
-                    if self.news_pool.has_breaking():
-                        self.log('🚨 Breaking interrupts wait!')
+                    if self.news_pool.has_breaking() or self.news_pool.has_viral():
+                        self.log('🚨/🔥 Breaking/Viral interrupts wait!')
                         break
                     await asyncio.sleep(1)
                 
@@ -1224,7 +1201,7 @@ class SmartNewsBot:
     # ==================== ✅ اجرای اصلی ====================
     async def run(self):
         self.log('=' * 70)
-        self.log('🤖 Rubika News Bot - Dual Algorithm System')
+        self.log('🤖 Rubika News Bot - Source Rotation')
         self.log('=' * 70)
         try:
             info = await self.bot.get_me()
@@ -1242,10 +1219,10 @@ class SmartNewsBot:
                 self.log('⚠️ مطمئن شوید ربات در کانال روبیکا عضو و ادمین باشد')
             self.log(f'⏱️ Interval: {self.fetch_interval//60}m')
             self.log(f'⏸️ Post delay: {MIN_POST_DELAY}-{MAX_POST_DELAY}s')
-            self.log(f'🔥 Viral Detection: Active')
-            self.log(f'🧠 Algorithm 1: Smart Priority ({len(PUBLISH_CYCLE_SLOTS)}-Stage)')
-            self.log(f'🔁 Algorithm 2: Source Rotation ({self.rotation_cycle_length} steps)')
-            self.log(f'🎯 Active Algorithm: {self.get_algorithm_name()}')
+            self.log(f'🔥 Viral Detection: Active (دقیق - چندمنبعی با پنجره زمانی)')
+            self.log(f'🚨 Breaking Detection: Active (دقیق - امتیازدهی وزنی)')
+            self.log(f'✍️ News Style: Active (سبک خبری روی همه خبرها)')
+            self.log(f'🔁 Algorithm: Source Rotation ({self.rotation_cycle_length} steps) - تنها الگوریتم')
             self.log(f'📤 مقصد انتشار: فقط کانال روبیکا')
             self.log(f'🇮🇷 منابع: فقط داخلی | بدون لینک خبر در پست‌ها')
             self.log('=' * 70 + '\n')
@@ -1262,15 +1239,9 @@ class SmartNewsBot:
         self.next_fetch_time = datetime.now() + timedelta(seconds=self.fetch_interval)
         
         try:
-            # ✅ حلقه اصلی - بر اساس الگوریتم انتخابی
+            # ✅ حلقه اصلی - تنها الگوریتم: Source Rotation
             while self.is_running:
-                if self.current_algorithm == ALGORITHM_SMART_PRIORITY:
-                    await self.publish_loop_smart_priority()
-                elif self.current_algorithm == ALGORITHM_SOURCE_ROTATION:
-                    await self.publish_loop_source_rotation()
-                else:
-                    self.log(f'❌ Unknown algorithm: {self.current_algorithm}')
-                    break
+                await self.publish_loop_source_rotation()
         except Exception as e:
             self.log(f'❌ Fatal: {e}')
             import traceback

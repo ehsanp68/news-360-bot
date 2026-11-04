@@ -4,7 +4,8 @@ News360 Rubika Bot - Glassmorphism UI - RESPONSIVE VERSION
 ✅ ScrolledFrame برای همه پنل‌ها
 ✅ Auto-scroll در مانیتورهای کوچک
 ✅ Minimum window size
-✅ Dual Algorithm System
+✅ Source Rotation Publishing (تک‌الگوریتم)
+✅ سبک خبری + تشخیص دقیق فوری/وایرال
 ✅ F11 Fullscreen Toggle
 ✅ انتشار فقط و فقط در کانال روبیکا (Rubika-only)
 ✅ فقط منابع داخلی - بدون لینک خبر در پست‌ها
@@ -171,9 +172,8 @@ class FontManager:
 # ==================== LOAD BOT ====================
 try:
     from bot import (SmartNewsBot, RUBIKA_BOT_TOKEN, RUBIKA_CHANNEL_ID,
-                     NEWS_SOURCES, PUBLISH_CYCLE_SLOTS, SOURCE_ROTATION_CYCLE,
-                     load_rubika_config, save_rubika_config,
-                     ALGORITHM_SMART_PRIORITY, ALGORITHM_SOURCE_ROTATION)
+                     NEWS_SOURCES, SOURCE_ROTATION_CYCLE,
+                     load_rubika_config, save_rubika_config)
 except ImportError as e:
     print(f"❌ Error loading bot: {e}")
     print("Make sure bot.py exists in the same directory!")
@@ -254,9 +254,6 @@ class GlassmorphicUI:
         self.viral_label = None
         self.breaking_label = None
 
-        self.current_algorithm = ALGORITHM_SMART_PRIORITY
-        self.btn_algo1 = None
-        self.btn_algo2 = None
         self.algorithm_info_label = None
         self.step_display_label = None
 
@@ -311,108 +308,29 @@ class GlassmorphicUI:
                 h = int(self.screen_height * 0.92)
                 self.root.geometry(f"{w}x{h}+0+0")
 
-    # ==================== مدیریت الگوریتم ====================
-    def select_algorithm(self, algorithm_name):
-        if algorithm_name == ALGORITHM_SMART_PRIORITY:
-            self.current_algorithm = ALGORITHM_SMART_PRIORITY
-            self.log(f"🧠 الگوریتم انتخاب شد: Smart Priority ({len(PUBLISH_CYCLE_SLOTS)}-Stage)", "success")
-        elif algorithm_name == ALGORITHM_SOURCE_ROTATION:
-            self.current_algorithm = ALGORITHM_SOURCE_ROTATION
-            self.log(f"🔁 الگوریتم انتخاب شد: Source Rotation ({len(SOURCE_ROTATION_CYCLE)} Steps)", "success")
-
-        if self.bot and self.is_running:
-            try:
-                self.bot.set_algorithm(self.current_algorithm)
-            except Exception as e:
-                self.log(f"⚠️ Could not switch algorithm: {e}", "warning")
-
-        self._update_algorithm_buttons()
-        self._update_algorithm_display()
-
-    def _update_algorithm_buttons(self):
-        if not self.btn_algo1 or not self.btn_algo2:
-            return
-
-        if self.current_algorithm == ALGORITHM_SMART_PRIORITY:
-            self.btn_algo1.config(
-                bg=self.colors['neon_cyan'], fg="#000000",
-                highlightbackground=self.colors['neon_cyan'], highlightthickness=3
-            )
-            self.btn_algo2.config(
-                bg=self.colors['glass_light'], fg=self.colors['text_secondary'],
-                highlightbackground=self.colors['glass_lighter'], highlightthickness=1
-            )
-        elif self.current_algorithm == ALGORITHM_SOURCE_ROTATION:
-            self.btn_algo1.config(
-                bg=self.colors['glass_light'], fg=self.colors['text_secondary'],
-                highlightbackground=self.colors['glass_lighter'], highlightthickness=1
-            )
-            self.btn_algo2.config(
-                bg=self.colors['neon_orange'], fg="#000000",
-                highlightbackground=self.colors['neon_orange'], highlightthickness=3
-            )
-
-    def _update_algorithm_display(self):
-        if self.algorithm_info_label:
-            if self.current_algorithm == ALGORITHM_SMART_PRIORITY:
-                self.algorithm_info_label.config(
-                    text="✅ ACTIVE: 🧠 Smart Priority",
-                    fg=self.colors['neon_cyan']
-                )
-                try:
-                    self.algorithm_info_label.master.config(
-                        highlightbackground=self.colors['neon_cyan']
-                    )
-                except:
-                    pass
-            elif self.current_algorithm == ALGORITHM_SOURCE_ROTATION:
-                self.algorithm_info_label.config(
-                    text="✅ ACTIVE: 🔁 Source Rotation",
-                    fg=self.colors['neon_orange']
-                )
-                try:
-                    self.algorithm_info_label.master.config(
-                        highlightbackground=self.colors['neon_orange']
-                    )
-                except:
-                    pass
-
+    # ==================== نمایش الگوریتم انتشار ====================
     def update_algorithm_step_display(self):
         if self.is_running and self.bot and self.step_display_label:
             try:
-                pool_size = self.bot.news_pool.size() if self.bot else 0
-
-                if self.current_algorithm == ALGORITHM_SOURCE_ROTATION:
-                    step_info = self.bot.get_current_step_info()
-                    if step_info:
-                        step_num = step_info['step_number']
-                        total = step_info['total_steps']
-                        step_type = step_info['step_type']
-                        source = step_info['source']
-                        wait_range = step_info['wait_range']
-
-                        if step_type == 'publish':
-                            text = f"📍 Step {step_num}/{total} → 📰 [{source}]"
-                            color = self.colors['neon_green']
-                        else:
-                            min_w, max_w = wait_range
-                            text = f"⏳ Step {step_num}/{total} → ⏱ Wait {min_w}-{max_w}s"
-                            color = self.colors['neon_yellow']
-
-                        self.step_display_label.config(text=text, fg=color)
+                pool_size = self.bot.news_pool.size()
+                step_info = self.bot.get_current_step_info()
+                if step_info:
+                    step_num = step_info['step_number']
+                    total = step_info['total_steps']
+                    if step_info['step_type'] == 'publish':
+                        text = f"📍 Step {step_num}/{total} → 📰 [{step_info['source']}] | Pool: {pool_size}"
+                        color = self.colors['neon_green']
                     else:
-                        self.step_display_label.config(
-                            text=f"🔁 Source Rotation | Pool: {pool_size}",
-                            fg=self.colors['neon_orange']
-                        )
+                        min_w, max_w = step_info['wait_range']
+                        text = f"⏳ Step {step_num}/{total} → ⏱ Wait {min_w}-{max_w}s | Pool: {pool_size}"
+                        color = self.colors['neon_yellow']
+                    self.step_display_label.config(text=text, fg=color)
                 else:
-                    cycle_idx = self.bot.news_pool.cycle_index if self.bot else 0
-                    n_slots = len(self.bot.news_pool.cycle_slots)
                     self.step_display_label.config(
-                        text=f"🧠 Smart Priority | Pool: {pool_size} | Cycle: {cycle_idx % n_slots + 1}/{n_slots}",
-                        fg=self.colors['neon_cyan']
+                        text=f"🔁 Source Rotation | Pool: {pool_size}",
+                        fg=self.colors['neon_orange']
                     )
-            except Exception as e:
+            except Exception:
                 pass
 
         self.root.after(1000, self.update_algorithm_step_display)
@@ -466,7 +384,7 @@ class GlassmorphicUI:
         
         self.create_stats_section(left_sf.interior)
         self.create_system_monitor_section(left_sf.interior)
-        self.create_algorithm_selector_section(left_sf.interior)
+        self.create_algorithm_section(left_sf.interior)
 
         # ✅ ✅ ✅ MIDDLE PANEL - ScrolledFrame
         middle_sf = ScrolledFrame(main_container, bg=self.colors['bg_main'])
@@ -511,7 +429,7 @@ class GlassmorphicUI:
 
         tk.Label(
             header_glass,
-            text="Rubika Channel Only • Domestic Sources • Dual Algorithm • Viral Detection",
+            text="Rubika Channel Only • Domestic Sources • Source Rotation • News Style",
             font=self.font_manager.get_font("tiny"),
             bg=self.colors['glass_dark'], fg=self.colors['neon_purple']
         ).pack(pady=(0, 3))
@@ -732,8 +650,8 @@ class GlassmorphicUI:
         )
         self.sys_info_label.pack(side=tk.LEFT)
 
-    # ==================== ALGORITHM SELECTOR ====================
-    def create_algorithm_selector_section(self, parent):
+    # ==================== PUBLISH ALGORITHM ====================
+    def create_algorithm_section(self, parent):
         tk.Label(
             parent, text="▌ PUBLISH ALGORITHM",
             font=self.font_manager.get_font("header"),
@@ -747,57 +665,35 @@ class GlassmorphicUI:
         algo_glass.pack(fill=tk.X, pady=(0, 5), padx=2)
 
         tk.Label(
-            algo_glass, text="🎯 Choose Algorithm:",
+            algo_glass, text="🔁 Source Rotation",
+            font=self.font_manager.get_font("header"),
+            bg=self.colors['glass_lighter'], fg=self.colors['neon_orange']
+        ).pack(anchor=tk.W, padx=10, pady=(5, 0))
+
+        tk.Label(
+            algo_glass,
+            text=f"{len(SOURCE_ROTATION_CYCLE)} Steps • Source-based • تنها الگوریتم انتشار",
             font=self.font_manager.get_font("tiny"),
             bg=self.colors['glass_lighter'], fg=self.colors['text_secondary']
-        ).pack(anchor=tk.W, padx=10, pady=(5, 3))
-
-        buttons_frame = tk.Frame(algo_glass, bg=self.colors['glass_lighter'])
-        buttons_frame.pack(fill=tk.X, padx=10, pady=3)
-
-        self.btn_algo1 = tk.Button(
-            buttons_frame,
-            text=f"🧠 Smart Priority\n━━━━━━━━━━━━\n{len(PUBLISH_CYCLE_SLOTS)}-Stage\nPriority-based",
-            command=lambda: self.select_algorithm(ALGORITHM_SMART_PRIORITY),
-            font=self.font_manager.get_font("tiny"),
-            bg=self.colors['neon_cyan'], fg="#000000",
-            activebackground=self.colors['neon_blue'], activeforeground="#ffffff",
-            relief=tk.FLAT, bd=0, padx=8, pady=8, cursor='hand2',
-            justify=tk.CENTER,
-            highlightbackground=self.colors['neon_cyan'], highlightthickness=3
-        )
-        self.btn_algo1.pack(side=tk.LEFT, padx=(0, 4), fill=tk.BOTH, expand=True)
-
-        self.btn_algo2 = tk.Button(
-            buttons_frame,
-            text=f"🔁 Source Rotation\n━━━━━━━━━━━━\n{len(SOURCE_ROTATION_CYCLE)}-Step\nSource-based",
-            command=lambda: self.select_algorithm(ALGORITHM_SOURCE_ROTATION),
-            font=self.font_manager.get_font("tiny"),
-            bg=self.colors['glass_light'], fg=self.colors['text_secondary'],
-            activebackground=self.colors['neon_orange'], activeforeground="#000000",
-            relief=tk.FLAT, bd=0, padx=8, pady=8, cursor='hand2',
-            justify=tk.CENTER,
-            highlightbackground=self.colors['glass_lighter'], highlightthickness=1
-        )
-        self.btn_algo2.pack(side=tk.LEFT, padx=(4, 0), fill=tk.BOTH, expand=True)
+        ).pack(anchor=tk.W, padx=10, pady=(0, 3))
 
         status_frame = tk.Frame(
             algo_glass, bg=self.colors['glass_dark'],
-            highlightthickness=2, highlightbackground=self.colors['neon_yellow']
+            highlightthickness=2, highlightbackground=self.colors['neon_orange']
         )
         status_frame.pack(fill=tk.X, padx=10, pady=(5, 5))
 
         self.algorithm_info_label = tk.Label(
             status_frame,
-            text="✅ ACTIVE: 🧠 Smart Priority",
+            text="✅ ACTIVE: 🔁 Source Rotation",
             font=self.font_manager.get_font("small"),
-            bg=self.colors['glass_dark'], fg=self.colors['neon_cyan']
+            bg=self.colors['glass_dark'], fg=self.colors['neon_orange']
         )
         self.algorithm_info_label.pack(pady=(5, 2))
 
         self.step_display_label = tk.Label(
             status_frame,
-            text="📊 Pool: 0 | Cycle: --",
+            text="📊 Pool: 0 | Step: --",
             font=self.font_manager.get_font("tiny"),
             bg=self.colors['glass_dark'], fg=self.colors['neon_yellow']
         )
@@ -1548,12 +1444,12 @@ class GlassmorphicUI:
         self.log(f"⏱ Fetch cycle set to {self.fetch_interval//60} minutes", "info")
         self.log("🧠 Smart Pool Management: ENABLED", "success")
         self.log("🔥 Viral Detection: ENABLED", "success")
-        self.log(f"🎯 Active Algorithm: {self.current_algorithm}", "success")
+        self.log(f"🔁 Algorithm: Source Rotation ({len(SOURCE_ROTATION_CYCLE)} steps)", "success")
+        self.log("✍️ News Style: ENABLED (سبک خبری برای همه خبرها)", "success")
         self.log(f"📤 Publishing target: Rubika channel {channel} ONLY", "success")
         self.log("📡 Initializing Rubika Connection...", "warning")
 
         self.bot.fetch_interval = self.fetch_interval
-        self.bot.set_algorithm(self.current_algorithm)
 
         self.bot_thread = threading.Thread(target=lambda: asyncio.run(self.bot.run()), daemon=True)
         self.bot_thread.start()
@@ -1605,10 +1501,8 @@ class GlassmorphicUI:
         self.log("📌 Responsive Design: Active", "success")
         self.log("📌 Minimum Size: 1280x720", "success")
         self.log("📌 Auto-Scroll: Enabled", "success")
-        self.log("📌 Dual Algorithm System: Active", "success")
-        self.log(f"🧠 Algorithm 1: Smart Priority ({len(PUBLISH_CYCLE_SLOTS)}-Stage)", "info")
-        self.log(f"🔁 Algorithm 2: Source Rotation ({len(SOURCE_ROTATION_CYCLE)} Steps)", "info")
-        self.log(f"🎯 Current: {self.current_algorithm}", "success")
+        self.log(f"🔁 Source Rotation: Active ({len(SOURCE_ROTATION_CYCLE)} Steps) - تنها الگوریتم", "success")
+        self.log("✍️ News Style: Active (سبک خبری برای همه خبرها)", "success")
         self.log("📌 Status Bar: Visible (maximized mode)", "success")
         self.log("🔘 F11: Toggle Fullscreen | ESC: Exit Fullscreen", "success")
         self.log("🔥 Viral Detection: Active", "success")
