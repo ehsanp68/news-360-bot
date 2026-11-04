@@ -93,10 +93,13 @@ def main():
     app = gui.GlassmorphicUI()
     print("✅ GUI constructed - all sections built without errors")
 
-    # فقط روبیکا و گوگل ترنسلیت باید باقی مانده باشند
-    assert set(app.platform_status.keys()) == {"rubika", "google_translate"}
-    assert set(app.platform_indicators.keys()) == {"rubika", "google_translate"}
-    print("✅ Platform status contains ONLY Rubika + Google Translate (no Telegram/Bale)")
+    # فقط روبیکا باید باقی مانده باشد (منابع خارجی و ترجمه حذف شده‌اند)
+    assert set(app.platform_status.keys()) == {"rubika"}
+    assert set(app.platform_indicators.keys()) == {"rubika"}
+    assert not hasattr(app, "test_translation"), "تستر ترجمه باید حذف شده باشد"
+    assert set(app.rss_status_labels.keys()) == set(gui.NEWS_SOURCES.keys()), \
+        "لیست RSS باید فقط منابع داخلی باشد"
+    print("✅ Platform status contains ONLY Rubika; RSS list is domestic-only")
 
     # ویجت‌های تنظیمات روبیکا ساخته شده‌اند
     assert hasattr(app, "rubika_token_var") and hasattr(app, "rubika_channel_var")

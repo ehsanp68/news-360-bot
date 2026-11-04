@@ -5,9 +5,9 @@ News360 Rubika Bot - Glassmorphism UI - RESPONSIVE VERSION
 ✅ Auto-scroll در مانیتورهای کوچک
 ✅ Minimum window size
 ✅ Dual Algorithm System
-✅ Google Translate Integration
 ✅ F11 Fullscreen Toggle
 ✅ انتشار فقط و فقط در کانال روبیکا (Rubika-only)
+✅ فقط منابع داخلی - بدون لینک خبر در پست‌ها
 """
 import tkinter as tk
 from tkinter import scrolledtext, messagebox, Canvas
@@ -171,7 +171,7 @@ class FontManager:
 # ==================== LOAD BOT ====================
 try:
     from bot import (SmartNewsBot, RUBIKA_BOT_TOKEN, RUBIKA_CHANNEL_ID,
-                     NEWS_SOURCES, INTERNATIONAL_SOURCES,
+                     NEWS_SOURCES, PUBLISH_CYCLE_SLOTS, SOURCE_ROTATION_CYCLE,
                      load_rubika_config, save_rubika_config,
                      ALGORITHM_SMART_PRIORITY, ALGORITHM_SOURCE_ROTATION)
 except ImportError as e:
@@ -239,10 +239,9 @@ class GlassmorphicUI:
         self.connection_status = "OFFLINE"
         self.connection_color = self.colors['neon_pink']
         self.category_labels = {}
-        # ✅ فقط روبیکا (مقصد انتشار) + گوگل ترنسلیت (سرویس ترجمه)
+        # ✅ فقط روبیکا (تنها مقصد انتشار)
         self.platform_status = {
             'rubika': False,
-            'google_translate': False,
         }
         self.platform_indicators = {}
         self.rss_status_labels = {}
@@ -252,10 +251,8 @@ class GlassmorphicUI:
         self.ram_label = None
         self.bot_start_time = None
         self.uptime_label = None
-        self.translation_stats_labels = {}
         self.viral_label = None
         self.breaking_label = None
-        self.google_status_label = None
 
         self.current_algorithm = ALGORITHM_SMART_PRIORITY
         self.btn_algo1 = None
@@ -278,10 +275,8 @@ class GlassmorphicUI:
         self.update_platform_status()
         self.update_rss_status()
         self.update_uptime()
-        self.update_translation_stats()
         self.update_viral_breaking_stats()
         self.update_algorithm_step_display()
-        self.check_google_translate_status()
 
     # ==================== ✅ ✅ ✅ Resize Handler ====================
     def on_window_resize(self, event):
@@ -320,10 +315,10 @@ class GlassmorphicUI:
     def select_algorithm(self, algorithm_name):
         if algorithm_name == ALGORITHM_SMART_PRIORITY:
             self.current_algorithm = ALGORITHM_SMART_PRIORITY
-            self.log("🧠 الگوریتم انتخاب شد: Smart Priority (20-Stage)", "success")
+            self.log(f"🧠 الگوریتم انتخاب شد: Smart Priority ({len(PUBLISH_CYCLE_SLOTS)}-Stage)", "success")
         elif algorithm_name == ALGORITHM_SOURCE_ROTATION:
             self.current_algorithm = ALGORITHM_SOURCE_ROTATION
-            self.log("🔁 الگوریتم انتخاب شد: Source Rotation (20 Steps)", "success")
+            self.log(f"🔁 الگوریتم انتخاب شد: Source Rotation ({len(SOURCE_ROTATION_CYCLE)} Steps)", "success")
 
         if self.bot and self.is_running:
             try:
@@ -412,140 +407,15 @@ class GlassmorphicUI:
                         )
                 else:
                     cycle_idx = self.bot.news_pool.cycle_index if self.bot else 0
+                    n_slots = len(self.bot.news_pool.cycle_slots)
                     self.step_display_label.config(
-                        text=f"🧠 Smart Priority | Pool: {pool_size} | Cycle: {cycle_idx % 20 + 1}/20",
+                        text=f"🧠 Smart Priority | Pool: {pool_size} | Cycle: {cycle_idx % n_slots + 1}/{n_slots}",
                         fg=self.colors['neon_cyan']
                     )
             except Exception as e:
                 pass
 
         self.root.after(1000, self.update_algorithm_step_display)
-
-    # ==================== TEST TRANSLATION ====================
-    def test_translation(self):
-        dialog = tk.Toplevel(self.root)
-        dialog.title("🧪 Test Translation")
-        dialog.geometry("700x550")
-        dialog.configure(bg=self.colors['glass_dark'])
-        dialog.transient(self.root)
-        dialog.attributes('-topmost', True)
-
-        tk.Label(
-            dialog, text="🧪 TRANSLATION TESTER",
-            font=self.font_manager.get_font("header"),
-            bg=self.colors['glass_dark'], fg=self.colors['neon_cyan']
-        ).pack(pady=(15, 10))
-
-        tk.Label(
-            dialog, text="Engine: Google Translate + News Style Post-Processing",
-            font=self.font_manager.get_font("tiny"),
-            bg=self.colors['glass_dark'], fg=self.colors['text_muted']
-        ).pack(pady=(0, 10))
-
-        input_frame = tk.Frame(dialog, bg=self.colors['glass_lighter'],
-                              highlightthickness=2, highlightbackground=self.colors['neon_blue'])
-        input_frame.pack(fill=tk.X, padx=20, pady=5)
-
-        tk.Label(
-            input_frame, text="📝 English Text (Input):",
-            font=self.font_manager.get_font("small"),
-            bg=self.colors['glass_lighter'], fg=self.colors['neon_blue']
-        ).pack(anchor=tk.W, padx=10, pady=(8, 2))
-
-        input_text = tk.Text(
-            input_frame, height=6,
-            bg=self.colors['glass_dark'], fg=self.colors['neon_green'],
-            font=self.font_manager.get_font("body"),
-            insertbackground=self.colors['neon_green'],
-            relief=tk.FLAT, bd=0, padx=10, pady=8
-        )
-        input_text.pack(fill=tk.X, padx=8, pady=(0, 8))
-        input_text.insert(tk.END, "US President announces new sanctions on Iran's oil exports")
-
-        btn_frame = tk.Frame(dialog, bg=self.colors['glass_dark'])
-        btn_frame.pack(fill=tk.X, padx=20, pady=10)
-
-        def do_translate():
-            text = input_text.get("1.0", tk.END).strip()
-            if not text:
-                messagebox.showwarning("Warning", "Please enter some text!")
-                return
-            output_text.delete("1.0", tk.END)
-            output_text.insert(tk.END, "⏳ Translating... Please wait...")
-            translate_btn.config(state=tk.DISABLED)
-
-            def run_translation():
-                try:
-                    from deep_translator import GoogleTranslator
-                    translator = GoogleTranslator(source='en', target='fa')
-                    result = translator.translate(text)
-
-                    if result:
-                        if self.bot:
-                            try:
-                                result = self.bot._apply_news_style(result, text, is_title=False)
-                                result = self.bot._clean_translation(result)
-                            except:
-                                pass
-                        result = f"✅ {result}"
-                    else:
-                        result = "❌ Translation failed"
-                except ImportError:
-                    result = "❌ Error: deep-translator not installed\n\nRun: pip install deep-translator"
-                except Exception as e:
-                    result = f"❌ Error: {e}\n\nCheck your internet connection."
-
-                self.root.after(0, lambda: update_output(result))
-
-            def update_output(result):
-                output_text.delete("1.0", tk.END)
-                output_text.insert(tk.END, result)
-                translate_btn.config(state=tk.NORMAL)
-
-            threading.Thread(target=run_translation, daemon=True).start()
-
-        translate_btn = tk.Button(
-            btn_frame, text="🔄 Translate", command=do_translate,
-            font=self.font_manager.get_font("body"),
-            bg=self.colors['neon_green'], fg="#000000",
-            activebackground=self.colors['neon_cyan'],
-            relief=tk.FLAT, bd=0, padx=20, pady=8, cursor='hand2'
-        )
-        translate_btn.pack(side=tk.LEFT, padx=5)
-
-        tk.Button(
-            btn_frame, text="🗑 Clear",
-            command=lambda: (input_text.delete("1.0", tk.END), output_text.delete("1.0", tk.END)),
-            font=self.font_manager.get_font("body"),
-            bg=self.colors['neon_purple'], fg="#ffffff",
-            relief=tk.FLAT, bd=0, padx=20, pady=8, cursor='hand2'
-        ).pack(side=tk.LEFT, padx=5)
-
-        tk.Button(
-            btn_frame, text="✖ Close", command=dialog.destroy,
-            font=self.font_manager.get_font("body"),
-            bg=self.colors['neon_pink'], fg="#ffffff",
-            relief=tk.FLAT, bd=0, padx=20, pady=8, cursor='hand2'
-        ).pack(side=tk.RIGHT, padx=5)
-
-        output_frame = tk.Frame(dialog, bg=self.colors['glass_lighter'],
-                               highlightthickness=2, highlightbackground=self.colors['neon_purple'])
-        output_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=5)
-
-        tk.Label(
-            output_frame, text="🇮🇷 Persian Translation (Output):",
-            font=self.font_manager.get_font("small"),
-            bg=self.colors['glass_lighter'], fg=self.colors['neon_purple']
-        ).pack(anchor=tk.W, padx=10, pady=(8, 2))
-
-        output_text = tk.Text(
-            output_frame, height=8,
-            bg=self.colors['glass_dark'], fg=self.colors['neon_pink'],
-            font=self.font_manager.get_font("body"),
-            insertbackground=self.colors['neon_pink'],
-            relief=tk.FLAT, bd=0, padx=10, pady=8
-        )
-        output_text.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
 
     def force_fetch(self):
         if not self.is_running or not self.bot:
@@ -641,7 +511,7 @@ class GlassmorphicUI:
 
         tk.Label(
             header_glass,
-            text="Rubika Channel Only • Dual Algorithm • Google Translate • Viral Detection",
+            text="Rubika Channel Only • Domestic Sources • Dual Algorithm • Viral Detection",
             font=self.font_manager.get_font("tiny"),
             bg=self.colors['glass_dark'], fg=self.colors['neon_purple']
         ).pack(pady=(0, 3))
@@ -735,10 +605,6 @@ class GlassmorphicUI:
             ('🔥', 'VIRAL NEWS', 'viral', self.colors['neon_orange']),
             ('🚨', 'BREAKING NEWS', 'breaking', self.colors['neon_red']),
             ('', '', None, None),
-            ('━━━ TRANSLATION ━━━', None, None, self.colors['neon_purple']),
-            ('🌐', 'GOOGLE', 'trans_google', self.colors['neon_green']),
-            ('❌', 'FAILED', 'trans_failed', self.colors['neon_pink']),
-            ('', '', None, None),
             ('━━━ FILTER STATS ━━━', None, None, self.colors['neon_purple']),
             ('⏭', 'DUPLICATES', 'dups', self.colors['neon_purple']),
             ('🚫', 'FILTERED', 'filtered', self.colors['neon_pink']),
@@ -775,10 +641,6 @@ class GlassmorphicUI:
             val_label.pack(side=tk.RIGHT)
             self.stat_labels[key] = val_label
 
-        self.translation_stats_labels = {
-            'google': self.stat_labels.get('trans_google'),
-            'failed': self.stat_labels.get('trans_failed'),
-        }
         self.viral_label = self.stat_labels.get('viral')
         self.breaking_label = self.stat_labels.get('breaking')
 
@@ -895,7 +757,7 @@ class GlassmorphicUI:
 
         self.btn_algo1 = tk.Button(
             buttons_frame,
-            text="🧠 Smart Priority\n━━━━━━━━━━━━\n20-Stage\nPriority-based",
+            text=f"🧠 Smart Priority\n━━━━━━━━━━━━\n{len(PUBLISH_CYCLE_SLOTS)}-Stage\nPriority-based",
             command=lambda: self.select_algorithm(ALGORITHM_SMART_PRIORITY),
             font=self.font_manager.get_font("tiny"),
             bg=self.colors['neon_cyan'], fg="#000000",
@@ -908,7 +770,7 @@ class GlassmorphicUI:
 
         self.btn_algo2 = tk.Button(
             buttons_frame,
-            text="🔁 Source Rotation\n━━━━━━━━━━━━\n20-Step\nSource-based",
+            text=f"🔁 Source Rotation\n━━━━━━━━━━━━\n{len(SOURCE_ROTATION_CYCLE)}-Step\nSource-based",
             command=lambda: self.select_algorithm(ALGORITHM_SOURCE_ROTATION),
             font=self.font_manager.get_font("tiny"),
             bg=self.colors['glass_light'], fg=self.colors['text_secondary'],
@@ -1116,12 +978,6 @@ class GlassmorphicUI:
         ).pack(side=tk.LEFT, padx=2, expand=True, fill=tk.BOTH)
 
         tk.Button(
-            row2, text="🧪 TEST", command=self.test_translation,
-            bg=self.colors['neon_orange'], fg="#000000",
-            activebackground=self.colors['neon_blue'], **button_style
-        ).pack(side=tk.LEFT, padx=2, expand=True, fill=tk.BOTH)
-
-        tk.Button(
             row2, text="🔄 FETCH", command=self.force_fetch,
             bg=self.colors['neon_blue'], fg="#000000",
             activebackground=self.colors['neon_cyan'], **button_style
@@ -1253,10 +1109,9 @@ class GlassmorphicUI:
         )
         platform_glass.pack(fill=tk.X, pady=(0, 5), padx=2)
 
-        # ✅ فقط روبیکا به عنوان مقصد انتشار + گوگل ترنسلیت به عنوان سرویس ترجمه
+        # ✅ فقط روبیکا به عنوان مقصد انتشار
         platforms = [
             ('💎', 'Rubika Channel', 'rubika'),
-            ('🌐', 'Google Translate', 'google_translate'),
         ]
 
         tk.Label(
@@ -1283,9 +1138,6 @@ class GlassmorphicUI:
             indicator.pack(side=tk.RIGHT)
             self.platform_indicators[key] = indicator
 
-            if key == 'google_translate':
-                self.google_status_label = indicator
-
     def update_platform_status(self):
         # ✅ وضعیت واقعی اتصال به روبیکا از خود ربات خوانده می‌شود
         if self.is_running and self.bot:
@@ -1295,8 +1147,6 @@ class GlassmorphicUI:
 
         try:
             for platform, is_online in self.platform_status.items():
-                if platform == 'google_translate':
-                    continue
                 if platform in self.platform_indicators:
                     if is_online:
                         self.platform_indicators[platform].config(
@@ -1310,32 +1160,6 @@ class GlassmorphicUI:
             pass
 
         self.root.after(3000, self.update_platform_status)
-
-    def check_google_translate_status(self):
-        def run():
-            try:
-                from deep_translator import GoogleTranslator
-                translator = GoogleTranslator(source='en', target='fa')
-                result = translator.translate("test")
-                is_online = bool(result)
-            except:
-                is_online = False
-            self.root.after(0, lambda: self.update_google_ui(is_online))
-
-        threading.Thread(target=run, daemon=True).start()
-        self.root.after(10000, self.check_google_translate_status)
-
-    def update_google_ui(self, is_online):
-        self.platform_status['google_translate'] = is_online
-        if self.google_status_label:
-            if is_online:
-                self.google_status_label.config(
-                    text="🟢 ONLINE", fg=self.colors['neon_green']
-                )
-            else:
-                self.google_status_label.config(
-                    text="🔴 OFFLINE", fg=self.colors['neon_pink']
-                )
 
     # ==================== RSS STATUS ====================
     def create_rss_status_section(self, parent):
@@ -1351,10 +1175,8 @@ class GlassmorphicUI:
         )
         rss_glass.pack(fill=tk.BOTH, expand=True, pady=(0, 5), padx=2)
 
-        # ✅ لیست منابع مستقیماً از bot.py خوانده می‌شود تا همیشه دقیق باشد
-        domestic_sources = list(NEWS_SOURCES.keys())
-        international_sources = list(INTERNATIONAL_SOURCES.keys())
-        all_sources = domestic_sources + international_sources
+        # ✅ لیست منابع مستقیماً از bot.py خوانده می‌شود (فقط داخلی)
+        all_sources = list(NEWS_SOURCES.keys())
 
         for source in all_sources:
             row = tk.Frame(rss_glass, bg=self.colors['glass_lighter'])
@@ -1607,23 +1429,6 @@ class GlassmorphicUI:
 
         self.root.after(1000, self.update_uptime)
 
-    def update_translation_stats(self):
-        if self.is_running and self.bot:
-            try:
-                stats = self.bot.translation_stats
-                if self.translation_stats_labels.get('google'):
-                    self.translation_stats_labels['google'].config(
-                        text=str(stats.get('google', 0))
-                    )
-                if self.translation_stats_labels.get('failed'):
-                    self.translation_stats_labels['failed'].config(
-                        text=str(stats.get('failed', 0))
-                    )
-            except:
-                pass
-
-        self.root.after(2000, self.update_translation_stats)
-
     def update_viral_breaking_stats(self):
         if self.is_running and self.bot:
             try:
@@ -1743,7 +1548,6 @@ class GlassmorphicUI:
         self.log(f"⏱ Fetch cycle set to {self.fetch_interval//60} minutes", "info")
         self.log("🧠 Smart Pool Management: ENABLED", "success")
         self.log("🔥 Viral Detection: ENABLED", "success")
-        self.log("🌐 Google Translate + News Style: ENABLED", "success")
         self.log(f"🎯 Active Algorithm: {self.current_algorithm}", "success")
         self.log(f"📤 Publishing target: Rubika channel {channel} ONLY", "success")
         self.log("📡 Initializing Rubika Connection...", "warning")
@@ -1802,12 +1606,11 @@ class GlassmorphicUI:
         self.log("📌 Minimum Size: 1280x720", "success")
         self.log("📌 Auto-Scroll: Enabled", "success")
         self.log("📌 Dual Algorithm System: Active", "success")
-        self.log("🧠 Algorithm 1: Smart Priority (20-Stage)", "info")
-        self.log("🔁 Algorithm 2: Source Rotation (20 Steps)", "info")
+        self.log(f"🧠 Algorithm 1: Smart Priority ({len(PUBLISH_CYCLE_SLOTS)}-Stage)", "info")
+        self.log(f"🔁 Algorithm 2: Source Rotation ({len(SOURCE_ROTATION_CYCLE)} Steps)", "info")
         self.log(f"🎯 Current: {self.current_algorithm}", "success")
         self.log("📌 Status Bar: Visible (maximized mode)", "success")
         self.log("🔘 F11: Toggle Fullscreen | ESC: Exit Fullscreen", "success")
-        self.log("🌐 Google Translate: Active", "info")
         self.log("🔥 Viral Detection: Active", "success")
         _token, _channel = load_rubika_config()
         if not _token or not _channel:

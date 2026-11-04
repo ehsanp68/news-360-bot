@@ -5,5 +5,4 @@ feedparser
 beautifulsoup4
 requests
 aiohttp
-deep-translator
 psutil
