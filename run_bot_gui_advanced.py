@@ -1,5 +1,5 @@
 """
-News360 Smart Bot - Glassmorphism UI - RESPONSIVE VERSION
+News360 Rubika Bot - Glassmorphism UI - RESPONSIVE VERSION
 ✅ Responsive Design - سازگار با همه رزولوشن‌ها
 ✅ ScrolledFrame برای همه پنل‌ها
 ✅ Auto-scroll در مانیتورهای کوچک
@@ -7,6 +7,7 @@ News360 Smart Bot - Glassmorphism UI - RESPONSIVE VERSION
 ✅ Dual Algorithm System
 ✅ Google Translate Integration
 ✅ F11 Fullscreen Toggle
+✅ انتشار فقط و فقط در کانال روبیکا (Rubika-only)
 """
 import tkinter as tk
 from tkinter import scrolledtext, messagebox, Canvas
@@ -169,17 +170,14 @@ class FontManager:
 
 # ==================== LOAD BOT ====================
 try:
-    try:
-        from bot import (SmartNewsBot, BOT_TOKEN, CHANNEL_USERNAME,
-                        ALGORITHM_SMART_PRIORITY, ALGORITHM_SOURCE_ROTATION)
-    except ImportError:
-        try:
-            from telegram_news_bot import (SmartNewsBot, BOT_TOKEN, CHANNEL_USERNAME,
-                                          ALGORITHM_SMART_PRIORITY, ALGORITHM_SOURCE_ROTATION)
-        except ImportError as e:
-            print(f"❌ Error loading bot: {e}")
-            print("Make sure bot.py exists in the same directory!")
-            sys.exit(1)
+    from bot import (SmartNewsBot, RUBIKA_BOT_TOKEN, RUBIKA_CHANNEL_ID,
+                     NEWS_SOURCES, INTERNATIONAL_SOURCES,
+                     load_rubika_config, save_rubika_config,
+                     ALGORITHM_SMART_PRIORITY, ALGORITHM_SOURCE_ROTATION)
+except ImportError as e:
+    print(f"❌ Error loading bot: {e}")
+    print("Make sure bot.py exists in the same directory!")
+    sys.exit(1)
 except Exception as e:
     print(f"❌ Critical error: {e}")
     sys.exit(1)
@@ -188,7 +186,7 @@ except Exception as e:
 class GlassmorphicUI:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("News360 Smart Bot - Responsive")
+        self.root.title("News360 Rubika Bot - Responsive")
 
         self.root.attributes('-topmost', True)
         self.screen_width = self.root.winfo_screenwidth()
@@ -234,17 +232,17 @@ class GlassmorphicUI:
         }
 
         self.bot = None
+        self.bot_thread = None
         self.is_running = False
         self.fetch_interval = 30 * 60
         self.next_fetch_time = None
         self.connection_status = "OFFLINE"
         self.connection_color = self.colors['neon_pink']
         self.category_labels = {}
+        # ✅ فقط روبیکا (مقصد انتشار) + گوگل ترنسلیت (سرویس ترجمه)
         self.platform_status = {
-            'telegram': False,
-            'google_translate': False,
-            'bale': False,
             'rubika': False,
+            'google_translate': False,
         }
         self.platform_indicators = {}
         self.rss_status_labels = {}
@@ -621,6 +619,7 @@ class GlassmorphicUI:
         extra_sf.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(5, 0))
         extra_sf.canvas.configure(width=320)
         
+        self.create_rubika_settings_section(extra_sf.interior)
         self.create_platform_status_section(extra_sf.interior)
         self.create_rss_status_section(extra_sf.interior)
 
@@ -642,7 +641,7 @@ class GlassmorphicUI:
 
         tk.Label(
             header_glass,
-            text="Dual Algorithm • Google Translate • Viral Detection • Smart Automation",
+            text="Rubika Channel Only • Dual Algorithm • Google Translate • Viral Detection",
             font=self.font_manager.get_font("tiny"),
             bg=self.colors['glass_dark'], fg=self.colors['neon_purple']
         ).pack(pady=(0, 3))
@@ -687,11 +686,13 @@ class GlassmorphicUI:
         )
         self.time_label.pack(side=tk.LEFT)
 
-        tk.Label(
-            inner, text=f"📡 {CHANNEL_USERNAME}",
+        _cfg_token, _cfg_channel = load_rubika_config()
+        self.channel_label = tk.Label(
+            inner, text=f"📡 Rubika: {_cfg_channel or '(تنظیم نشده)'}",
             font=self.font_manager.get_font("tiny"),
             bg=self.colors['glass_light'], fg=self.colors['text_primary']
-        ).pack(side=tk.LEFT, padx=20)
+        )
+        self.channel_label.pack(side=tk.LEFT, padx=20)
 
         self.uptime_label = tk.Label(
             inner, text="⏱ --:--:--",
@@ -1132,6 +1133,112 @@ class GlassmorphicUI:
             activebackground='#8b00ff', **button_style
         ).pack(side=tk.LEFT, padx=2, expand=True, fill=tk.BOTH)
 
+    # ==================== RUBIKA SETTINGS ====================
+    def create_rubika_settings_section(self, parent):
+        tk.Label(
+            parent, text="▌ RUBIKA SETTINGS",
+            font=self.font_manager.get_font("header"),
+            bg=self.colors['bg_main'], fg=self.colors['neon_green']
+        ).pack(anchor=tk.W, pady=(5, 3))
+
+        settings_glass = self.create_glass_frame(
+            parent, bg_color=self.colors['glass_lighter'],
+            border_color=self.colors['neon_green'], border_width=2
+        )
+        settings_glass.pack(fill=tk.X, pady=(0, 5), padx=2)
+
+        cfg_token, cfg_channel = load_rubika_config()
+        self.rubika_token_var = tk.StringVar(value=cfg_token)
+        self.rubika_channel_var = tk.StringVar(value=cfg_channel)
+        self.show_token_var = tk.BooleanVar(value=False)
+
+        tk.Label(
+            settings_glass, text="🔑 Bot Token (توکن ربات روبیکا):",
+            font=self.font_manager.get_font("tiny"),
+            bg=self.colors['glass_lighter'], fg=self.colors['text_secondary']
+        ).pack(anchor=tk.W, padx=10, pady=(6, 0))
+
+        self.token_entry = tk.Entry(
+            settings_glass, textvariable=self.rubika_token_var, show="•",
+            bg=self.colors['glass_dark'], fg=self.colors['neon_green'],
+            insertbackground=self.colors['neon_green'],
+            relief=tk.FLAT, bd=0, font=self.font_manager.get_font("small")
+        )
+        self.token_entry.pack(fill=tk.X, padx=10, pady=(2, 2), ipady=4)
+
+        tk.Checkbutton(
+            settings_glass, text="نمایش توکن", variable=self.show_token_var,
+            command=self._toggle_token_visibility,
+            bg=self.colors['glass_lighter'], fg=self.colors['text_muted'],
+            activebackground=self.colors['glass_lighter'],
+            activeforeground=self.colors['text_secondary'],
+            selectcolor=self.colors['glass_dark'],
+            font=self.font_manager.get_font("tiny"),
+            relief=tk.FLAT, bd=0, highlightthickness=0
+        ).pack(anchor=tk.W, padx=8)
+
+        tk.Label(
+            settings_glass, text="📢 Channel ID (آیدی کانال روبیکا):",
+            font=self.font_manager.get_font("tiny"),
+            bg=self.colors['glass_lighter'], fg=self.colors['text_secondary']
+        ).pack(anchor=tk.W, padx=10, pady=(4, 0))
+
+        self.channel_entry = tk.Entry(
+            settings_glass, textvariable=self.rubika_channel_var,
+            bg=self.colors['glass_dark'], fg=self.colors['neon_cyan'],
+            insertbackground=self.colors['neon_cyan'],
+            relief=tk.FLAT, bd=0, font=self.font_manager.get_font("small")
+        )
+        self.channel_entry.pack(fill=tk.X, padx=10, pady=(2, 6), ipady=4)
+
+        tk.Button(
+            settings_glass, text="💾 SAVE SETTINGS",
+            command=self.save_rubika_settings,
+            font=self.font_manager.get_font("tiny"),
+            bg=self.colors['neon_green'], fg="#000000",
+            activebackground=self.colors['neon_cyan'],
+            relief=tk.FLAT, bd=0, padx=8, pady=4, cursor='hand2'
+        ).pack(fill=tk.X, padx=10, pady=(0, 4))
+
+        tk.Label(
+            settings_glass, text="💡 ربات را در کانال روبیکا ادمین کنید",
+            font=self.font_manager.get_font("tiny"),
+            bg=self.colors['glass_lighter'], fg=self.colors['text_muted']
+        ).pack(padx=10, pady=(0, 6))
+
+    def _toggle_token_visibility(self):
+        try:
+            self.token_entry.config(show="" if self.show_token_var.get() else "•")
+        except:
+            pass
+
+    def save_rubika_settings(self):
+        token = self.rubika_token_var.get().strip()
+        channel = self.rubika_channel_var.get().strip()
+        if not token or not channel:
+            messagebox.showwarning(
+                "تنظیمات روبیکا",
+                "توکن ربات و آیدی کانال روبیکا را کامل وارد کنید!"
+            )
+            return
+        try:
+            save_rubika_config(token, channel)
+        except Exception as e:
+            messagebox.showerror("خطا", f"❌ ذخیره تنظیمات ناموفق: {e}")
+            return
+        try:
+            self.channel_label.config(text=f"📡 Rubika: {channel}")
+        except:
+            pass
+        self.log(f"💾 Rubika settings saved | Channel: {channel}", "success")
+        if self.is_running:
+            messagebox.showinfo(
+                "تنظیمات روبیکا",
+                "✅ تنظیمات ذخیره شد.\nبرای اعمال، ربات را Stop و دوباره Start کنید."
+            )
+        else:
+            messagebox.showinfo("تنظیمات روبیکا", "✅ تنظیمات ذخیره شد.")
+
     # ==================== PLATFORM STATUS ====================
     def create_platform_status_section(self, parent):
         tk.Label(
@@ -1146,12 +1253,17 @@ class GlassmorphicUI:
         )
         platform_glass.pack(fill=tk.X, pady=(0, 5), padx=2)
 
+        # ✅ فقط روبیکا به عنوان مقصد انتشار + گوگل ترنسلیت به عنوان سرویس ترجمه
         platforms = [
-            ('📱', 'Telegram', 'telegram'),
+            ('💎', 'Rubika Channel', 'rubika'),
             ('🌐', 'Google Translate', 'google_translate'),
-            ('💬', 'Bale', 'bale'),
-            ('💎', 'Rubika', 'rubika'),
         ]
+
+        tk.Label(
+            platform_glass, text="📤 انتشار اخبار فقط در کانال روبیکا",
+            font=self.font_manager.get_font("tiny"),
+            bg=self.colors['glass_lighter'], fg=self.colors['neon_green']
+        ).pack(anchor=tk.W, padx=10, pady=(5, 0))
 
         for emoji, name, key in platforms:
             row_frame = tk.Frame(platform_glass, bg=self.colors['glass_lighter'])
@@ -1175,13 +1287,11 @@ class GlassmorphicUI:
                 self.google_status_label = indicator
 
     def update_platform_status(self):
+        # ✅ وضعیت واقعی اتصال به روبیکا از خود ربات خوانده می‌شود
         if self.is_running and self.bot:
-            self.platform_status['telegram'] = True
-            self.platform_status['bale'] = False
-            self.platform_status['rubika'] = False
+            self.platform_status['rubika'] = bool(getattr(self.bot, 'rubika_connected', False))
         else:
-            for k in self.platform_status:
-                self.platform_status[k] = False
+            self.platform_status['rubika'] = False
 
         try:
             for platform, is_online in self.platform_status.items():
@@ -1241,10 +1351,9 @@ class GlassmorphicUI:
         )
         rss_glass.pack(fill=tk.BOTH, expand=True, pady=(0, 5), padx=2)
 
-        domestic_sources = ['ایرنا', 'ایسنا', 'مهر', 'فارس',
-                           'خبرآنلاین', 'میزان', 'خبرگزاری جوان', 'تسنیم']
-        international_sources = ['BBC', 'Reuters', 'CNN', 'The Guardian',
-                                'DW News', 'Al Jazeera']
+        # ✅ لیست منابع مستقیماً از bot.py خوانده می‌شود تا همیشه دقیق باشد
+        domestic_sources = list(NEWS_SOURCES.keys())
+        international_sources = list(INTERNATIONAL_SOURCES.keys())
         all_sources = domestic_sources + international_sources
 
         for source in all_sources:
@@ -1342,7 +1451,7 @@ class GlassmorphicUI:
         connection_inner = tk.Frame(connection_glass, bg=self.colors['glass_light'])
         connection_inner.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
 
-        tk.Label(connection_inner, text="📡 Telegram:",
+        tk.Label(connection_inner, text="📡 Rubika:",
                 font=self.font_manager.get_font("tiny"),
                 bg=self.colors['glass_light'], fg=self.colors['text_secondary']
         ).pack(side=tk.LEFT, padx=(0, 5))
@@ -1453,10 +1562,19 @@ class GlassmorphicUI:
                                    fill='#ffffff', stipple='gray25', outline="")
 
     def check_connection_status(self):
-        if self.is_running and self.bot:
+        # ✅ اگر ترد ربات به دلیل خطای اتصال بسته شده، وضعیت UI را درست کن
+        if self.is_running and self.bot_thread and not self.bot_thread.is_alive():
+            self.log("⚠️ Bot thread exited (connection failed or stopped)", "warning")
+            self.stop_bot()
+
+        if self.is_running and self.bot and getattr(self.bot, 'rubika_connected', False):
             self.connection_status = "ONLINE"
             self.connection_color = self.colors['neon_green']
             indicator_text = "🟢 ONLINE"
+        elif self.is_running and self.bot:
+            self.connection_status = "CONNECTING"
+            self.connection_color = self.colors['neon_yellow']
+            indicator_text = "🟡 CONNECTING"
         else:
             self.connection_status = "OFFLINE"
             self.connection_color = self.colors['neon_pink']
@@ -1464,6 +1582,8 @@ class GlassmorphicUI:
 
         try:
             self.connection_indicator.config(text=indicator_text, fg=self.connection_color)
+            if self.is_running:
+                self.status_label.config(text=indicator_text, fg=self.connection_color)
         except:
             pass
 
@@ -1594,15 +1714,28 @@ class GlassmorphicUI:
         if self.is_running:
             return
 
-        if not BOT_TOKEN or "YOUR" in str(BOT_TOKEN):
-            messagebox.showerror("ERROR", "TOKEN NOT SET!")
+        # ✅ فقط روبیکا - توکن و کانال از بخش RUBIKA SETTINGS خوانده می‌شود
+        token = self.rubika_token_var.get().strip() if hasattr(self, 'rubika_token_var') else RUBIKA_BOT_TOKEN
+        channel = self.rubika_channel_var.get().strip() if hasattr(self, 'rubika_channel_var') else RUBIKA_CHANNEL_ID
+
+        if not token:
+            messagebox.showerror("خطا", "توکن ربات روبیکا تنظیم نشده!\nبخش RUBIKA SETTINGS را کامل کنید.")
+            return
+        if not channel:
+            messagebox.showerror("خطا", "آیدی کانال روبیکا تنظیم نشده!\nبخش RUBIKA SETTINGS را کامل کنید.")
+            return
+
+        try:
+            self.bot = SmartNewsBot(log_callback=self.log, bot_token=token, channel_id=channel)
+        except ValueError as e:
+            messagebox.showerror("خطا", str(e))
             return
 
         self.is_running = True
         self.bot_start_time = datetime.now()
         self.start_btn.config(state=tk.DISABLED)
         self.stop_btn.config(state=tk.NORMAL)
-        self.status_label.config(text="🟢 ONLINE", fg=self.colors['neon_green'])
+        self.status_label.config(text="🟡 CONNECTING", fg=self.colors['neon_yellow'])
         self.next_fetch_time = datetime.now() + timedelta(seconds=self.fetch_interval)
 
         self.log("═══════════════════════════════════════════════", "system")
@@ -1612,14 +1745,14 @@ class GlassmorphicUI:
         self.log("🔥 Viral Detection: ENABLED", "success")
         self.log("🌐 Google Translate + News Style: ENABLED", "success")
         self.log(f"🎯 Active Algorithm: {self.current_algorithm}", "success")
-        self.log("📡 Initializing Telegram Connection...", "warning")
+        self.log(f"📤 Publishing target: Rubika channel {channel} ONLY", "success")
+        self.log("📡 Initializing Rubika Connection...", "warning")
 
-        self.bot = SmartNewsBot(log_callback=self.log)
         self.bot.fetch_interval = self.fetch_interval
         self.bot.set_algorithm(self.current_algorithm)
 
-        t = threading.Thread(target=lambda: asyncio.run(self.bot.run()), daemon=True)
-        t.start()
+        self.bot_thread = threading.Thread(target=lambda: asyncio.run(self.bot.run()), daemon=True)
+        self.bot_thread.start()
 
     def stop_bot(self):
         self.log("⛔ SHUTDOWN INITIATED", "error")
@@ -1664,6 +1797,7 @@ class GlassmorphicUI:
     def run(self):
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.log("✅ SYSTEM READY", "success")
+        self.log("💎 Rubika-only publishing: Active (فقط کانال روبیکا)", "success")
         self.log("📌 Responsive Design: Active", "success")
         self.log("📌 Minimum Size: 1280x720", "success")
         self.log("📌 Auto-Scroll: Enabled", "success")
@@ -1675,6 +1809,11 @@ class GlassmorphicUI:
         self.log("🔘 F11: Toggle Fullscreen | ESC: Exit Fullscreen", "success")
         self.log("🌐 Google Translate: Active", "info")
         self.log("🔥 Viral Detection: Active", "success")
+        _token, _channel = load_rubika_config()
+        if not _token or not _channel:
+            self.log("⚠️ توکن/کانال روبیکا تنظیم نشده - بخش RUBIKA SETTINGS را کامل کنید", "warning")
+        else:
+            self.log(f"📢 Rubika channel: {_channel}", "info")
         self.root.mainloop()
 
     def get_bold_font(self, size=42):

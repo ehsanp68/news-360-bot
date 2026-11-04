@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Secrets - تنظیمات روبیکا شامل توکن ربات است؛ هرگز کامیت نشود
+rubika_config.json
+.env
