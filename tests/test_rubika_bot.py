@@ -254,6 +254,36 @@ def test_news_style():
     print("✅ news style: Persian digits/punctuation/half-space/cleanup, idempotent")
 
 
+async def test_no_links_in_content():
+    # هیچ لینکی (حتی داخل متن خلاصه/عنوان RSS) نباید به پست روبیکا برسد
+    b = SmartNewsBot.__new__(SmartNewsBot)
+    samples = [
+        "به گزارش ایرنا، جلسه برگزار شد. https://www.irna.ir/news/85123456",
+        "متن کامل خبر در لینک زیر: irna.ir/xjQRST",
+        "مشروح خبر: mehrnews.com/x3ABCD",
+        "جزئیات بیشتر در www.farsnews.ir/news/123456789",
+        "قیمت دلار اعلام شد؛ ادامه مطلب: https://www.khabaronline.ir/tiny/98765",
+        "کانال ما: t.me/news360 و سایت example.com/path?a=1",
+    ]
+    for s in samples:
+        out = b._news_style(s).lower()
+        for marker in ("http", "www.", ".ir/", ".com", "t.me", "irna.ir", "mehrnews"):
+            assert marker not in out, f"لینک باقی مانده: {out!r}"
+        assert b._news_style(out) == out
+    # عنوان لینک‌دار + قالب‌بندی نهایی پست (متنی و وایرال)
+    news = {"title": "افتتاح خط مترو https://irna.ir/xjAB12",
+            "summary": "خط جدید افتتاح شد. مشروح خبر: irna.ir/xjAB12",
+            "source": "ایرنا", "emoji": "🚇", "link": "https://irna.ir/xjAB12"}
+    b.channel_id = "@news360_24"
+    text = await b._format(news)
+    viral = b._format_viral(dict(news, is_viral=True))
+    for t in (text, viral):
+        assert "http" not in t and "irna.ir" not in t and "www." not in t
+    # متن سالم بدون لینک نباید آسیب ببیند
+    assert b._news_style("تورم 1.5 درصد اعلام شد") == "تورم ۱.۵ درصد اعلام شد."
+    print("✅ no-links: URLs stripped from titles/summaries/posts (incl. short links)")
+
+
 def test_breaking_accuracy():
     b = SmartNewsBot.__new__(SmartNewsBot)
     positives = [
@@ -352,6 +382,7 @@ async def main():
     test_domestic_only()
     test_single_algorithm()
     test_news_style()
+    await test_no_links_in_content()
     test_breaking_accuracy()
     test_viral_accuracy()
     runner, base_url = await start_mock_server()

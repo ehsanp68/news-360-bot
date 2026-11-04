@@ -772,6 +772,24 @@ class SmartNewsBot:
         return DEFAULT_CATEGORY['name'], DEFAULT_CATEGORY['emoji']
 
     # ==================== ✍️ سبک خبری (اعمال روی همه خبرها) ====================
+    def _style_strip_links(self, text):
+        """🔗 حذف کامل لینک از متن خبر - هیچ لینکی نباید در پست روبیکا منتشر شود"""
+        # لینک کامل با پروتکل یا www
+        text = re.sub(r'(?:https?://|ftp://|www\.)\S+', '', text, flags=re.IGNORECASE)
+        # دامنه‌های بدون پروتکل + لینک کوتاه خبرگزاری‌ها (irna.ir/xjAB، t.me/… و ...)
+        text = re.sub(
+            r'\b(?:[a-zA-Z0-9-]+\.)+'
+            r'(?:ir|com|net|org|info|co|me|tv|news|press|online|link|ly|to|app|site|shop|club|fun|icu|xyz|top)'
+            r'(?:/\S*)?',
+            '', text, flags=re.IGNORECASE)
+        # برچسب‌های بی‌لینکِ باقی‌مانده در انتهای متن («مشروح خبر:»، «لینک خبر» و ...)
+        text = re.sub(r'[^.؟!؛\n]*لینک[^.؟!؛\n]*[:：]\s*$', '', text)
+        text = re.sub(r'(?:لینک|مشروح|جزئیات|متن کامل|ادامه)\s*(?:خبر|مطلب)?\s*[:：]\s*$', '', text)
+        text = re.sub(r'لینک\s+(?:خبر|مطلب|مشروح خبر)\s*$', '', text)
+        # حرف اضافه بی‌مفعول در انتهای متن (بعد از حذف لینک)
+        text = re.sub(r'\s+(?:در|از|به|با|برای)\s*$', '', text.strip())
+        return text.strip()
+
     def _style_normalize_chars(self, text):
         """اعداد فارسی ۰-۹ + ی/ک فارسی + حذف کشیده + نیم‌فاصله استاندارد"""
         text = text.translate(_DIGITS_TO_FA)
@@ -786,6 +804,7 @@ class SmartNewsBot:
         text = text.replace(';', '؛').replace('?', '؟')
         text = re.sub(r'(?<=\d),(?=\d)', '٬', text)   # جداکننده هزارگان
         text = text.replace(',', '،')
+        text = re.sub(r'[،؛:]\s*([.؟!])', r'\1', text)              # حذف نشانه اضافی قبل نشانه پایانی
         text = re.sub(r'\s+([،؛؟!:.])', r'\1', text)               # حذف فاصله قبل نشانه
         text = re.sub(r'([،؛؟!:])(?=[^\s\d])', r'\1 ', text)       # یک فاصله بعد نشانه
         text = re.sub(r'\.(?=[^\s\d.])', '. ', text)              # فاصله بعد نقطه (نه اعشار/سه‌نقطه)
@@ -807,16 +826,19 @@ class SmartNewsBot:
 
     def _style_summary(self, text):
         """خلاصه خبری: پایان با نقطه (بدون تغییر محتوا)"""
-        text = text.strip()
+        text = text.strip().rstrip('،؛: ').rstrip()
         if text and text[-1] not in '.؟!…':
             text += '.'
         return text
 
     def _news_style(self, text, is_title=False):
         """✍️ اعمال سبک خبری روی متن - idempotent (اجرای چندباره بی‌اثر)"""
-        if not text or not NEWS_STYLE_ENABLED:
+        if not text:
             return text
-        result = self._style_normalize_chars(text)
+        result = self._style_strip_links(text)
+        if not NEWS_STYLE_ENABLED:
+            return result
+        result = self._style_normalize_chars(result)
         result = self._style_fix_punctuation(result)
         result = self._style_remove_extra_words(result)
         return self._style_title(result) if is_title else self._style_summary(result)
