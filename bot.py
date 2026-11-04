@@ -2,10 +2,10 @@
 Rubika News Bot - Dual Algorithm System
 ✅ Algorithm 1: Smart Priority (الگوریتم هوشمند اولویت‌دار)
 ✅ Algorithm 2: Source Rotation (الگوریتم چرخش منبع)
-✅ Google Translate + News Style Post-Processing
 ✅ Viral Detection
 ✅ Source Diversity
 ✅ انتشار فقط و فقط در کانال روبیکا (Rubika-only publishing)
+✅ فقط منابع خبری داخلی - بدون لینک خبر در پست‌ها
 """
 import asyncio
 import feedparser
@@ -20,8 +20,6 @@ import json
 import time
 import os
 import requests
-from deep_translator import GoogleTranslator
-from concurrent.futures import ThreadPoolExecutor
 
 # ==================== تنظیمات اصلی (فقط روبیکا) ====================
 # این ربات اخبار را فقط و فقط در کانال روبیکا منتشر می‌کند.
@@ -87,13 +85,6 @@ NEWS_SOURCES = {
     'خبرگزاری جوان': 'https://www.yjc.ir/fa/rss/allnews',
 }
 
-INTERNATIONAL_SOURCES = {
-    'BBC': 'http://feeds.bbci.co.uk/news/rss.xml',
-    'Reuters': 'https://news.google.com/rss/search?q=iran&hl=en-US&gl=US&ceid=US:en',
-    'CNN': 'http://rss.cnn.com/rss/edition_world.rss',
-    'Al Jazeera': 'https://www.aljazeera.com/xml/rss/all.xml',
-}
-
 # ==================== تنظیمات زمانی ====================
 FETCH_INTERVAL = 30 * 60
 MIN_POST_DELAY = 120
@@ -107,30 +98,18 @@ SOURCE_ROTATION_CYCLE = [
     ('publish', 'ایرنا', None),
     ('wait', None, (120, 160)),
     # مرحله 3-4
-    ('publish', 'الجزیره', None),
-    ('wait', None, (120, 140)),
-    # مرحله 5-6
     ('publish', 'مهر', None),
     ('wait', None, (120, 160)),
-    # مرحله 7-8
+    # مرحله 5-6
     ('publish', 'خبرگزاری جوان', None),
     ('wait', None, (120, 160)),
-    # مرحله 9-10
-    ('publish', 'CNN', None),
-    ('wait', None, (45, 60)),
-    # مرحله 11-12
+    # مرحله 7-8
     ('publish', 'ایرنا', None),
     ('wait', None, (45, 60)),
-    # مرحله 13-14
+    # مرحله 9-10
     ('publish', 'ایسنا', None),
     ('wait', None, (120, 160)),
-    # مرحله 15-16
-    ('publish', 'Reuters', None),
-    ('wait', None, (45, 60)),
-    # مرحله 17-18
-    ('publish', 'BBC', None),
-    ('wait', None, (120, 160)),
-    # مرحله 19-20
+    # مرحله 11-12
     ('publish', 'مهر', None),
     ('wait', None, (60, 75)),
 ]
@@ -139,79 +118,6 @@ SOURCE_ROTATION_CYCLE = [
 INCLUDE_IMAGES = True
 INCLUDE_VIDEOS = True
 SUMMARY_WORDS = 90
-INTERNATIONAL_SUMMARY_WORDS = 60
-
-# ==================== تنظیمات ترجمه ====================
-USE_GOOGLE_TRANSLATE = True
-TRANSLATION_TITLE_MAX_WORDS = 15
-TRANSLATION_SUMMARY_MAX_WORDS = 60
-TRANSLATION_RETRY_DELAY = 2
-TRANSLATION_MAX_RETRIES = 2
-
-# ==================== دیکشنری اصطلاحات خبری ====================
-NEWS_TERMS_DICTIONARY = {
-    "said": "اعلام کرد", "announced": "اعلام کرد", "stated": "بیان کرد",
-    "reported": "گزارش داد", "revealed": "افشا کرد", "confirmed": "تأیید کرد",
-    "denied": "رد کرد", "warned": "هشدار داد", "emphasized": "تأکید کرد",
-    "highlighted": "اشاره کرد", "explained": "توضیح داد", "claimed": "ادعا کرد",
-    "accused": "متهم کرد", "demanded": "خواستار شد", "urged": "فراخوان داد",
-    "called for": "فراخوان داد", "threatened": "تهدید کرد", "promised": "قول داد",
-    "agreed": "موافقت کرد", "rejected": "رد کرد", "approved": "تصویب کرد",
-    "signed": "امضا کرد", "launched": "آغاز کرد", "initiated": "آغاز کرد",
-    "completed": "کامل کرد", "achieved": "دست یافت", "received": "دریافت کرد",
-    "provided": "ارائه داد", "offered": "پیشنهاد داد", "proposed": "پیشنهاد کرد",
-    "suggested": "پیشنهاد داد", "recommended": "توصیه کرد", "requested": "درخواست کرد",
-    "investigated": "بررسی کرد", "analyzed": "تحلیل کرد", "evaluated": "ارزیابی کرد",
-    "monitored": "نظارت کرد", "discovered": "کشف کرد", "identified": "شناسایی کرد",
-    "prevented": "جلوگیری کرد", "stopped": "متوقف کرد", "ended": "پایان داد",
-    "began": "آغاز کرد", "started": "شروع کرد", "continued": "ادامه داد",
-    "resumed": "از سر گرفت", "suspended": "تعلیق کرد", "postponed": "به تعویق انداخت",
-    "canceled": "لغو کرد", "killed": "کشته شد", "injured": "مجروح شد",
-    "arrested": "دستگیر شد", "released": "آزاد شد", "elected": "انتخاب شد",
-    "appointed": "منصوب شد", "resigned": "استعفا داد", "dismissed": "برکنار شد",
-    "president": "رئیس‌جمهور", "prime minister": "نخست‌وزیر", "minister": "وزیر",
-    "parliament": "مجلس", "government": "دولت", "administration": "دولت",
-    "official": "مقام", "spokesman": "سخنگو", "spokesperson": "سخنگو",
-    "ambassador": "سفیر", "diplomat": "دیپلمات", "senator": "سناتور",
-    "congressman": "نماینده کنگره", "lawmaker": "قانون‌گذار", "opposition": "اپوزیسیون",
-    "coalition": "ائتلاف", "alliance": "اتحاد", "treaty": "معاهده",
-    "agreement": "توافق", "sanctions": "تحریم‌ها", "embargo": "تحریم",
-    "resolution": "قطعنامه", "summit": "نشست", "meeting": "جلسه",
-    "conference": "کنفرانس", "negotiations": "مذاکرات", "dialogue": "گفت‌وگو",
-    "economy": "اقتصاد", "market": "بازار", "stock": "بورس", "inflation": "تورم",
-    "unemployment": "بیکاری", "growth": "رشد", "recession": "رکود",
-    "investment": "سرمایه‌گذاری", "trade": "تجارت", "export": "صادرات",
-    "import": "واردات", "currency": "ارز", "dollar": "دلار", "euro": "یورو",
-    "oil": "نفت", "gas": "گاز", "energy": "انرژی", "budget": "بودجه",
-    "deficit": "کسری", "surplus": "مازاد", "debt": "بدهی", "loan": "وام",
-    "interest": "بهره", "tax": "مالیات", "revenue": "درآمد", "profit": "سود",
-    "loss": "ضرر", "company": "شرکت", "corporation": "شرکت", "business": "کسب‌وکار",
-    "industry": "صنعت", "sector": "بخش", "military": "نظامی", "army": "ارتش",
-    "force": "نیرو", "troops": "نیروها", "soldier": "سرباز", "commander": "فرمانده",
-    "general": "ژنرال", "attack": "حمله", "strike": "حمله", "bombing": "بمباران",
-    "missile": "موشک", "weapon": "سلاح", "war": "جنگ", "conflict": "درگیری",
-    "battle": "نبرد", "operation": "عملیات", "mission": "مأموریت", "security": "امنیت",
-    "defense": "دفاع", "intelligence": "اطلاعات", "terrorist": "تروریست",
-    "terrorism": "تروریسم", "protest": "اعتراض", "demonstration": "تظاهرات",
-    "riot": "شورش", "strike": "اعتصاب", "worker": "کارگر", "union": "اتحادیه",
-    "student": "دانشجو", "teacher": "معلم", "doctor": "پزشک", "hospital": "بیمارستان",
-    "school": "مدرسه", "university": "دانشگاه", "education": "آموزش", "health": "بهداشت",
-    "medical": "پزشکی", "disease": "بیماری", "virus": "ویروس", "pandemic": "همه‌گیری",
-    "vaccine": "واکسن", "treatment": "درمان", "patient": "بیمار",
-}
-
-NEWS_PATTERNS = [
-    (r'(\d+)\s+percent', r'\1 درصد'),
-    (r'(\d+)\s+billion', r'\1 میلیارد'),
-    (r'(\d+)\s+million', r'\1 میلیون'),
-    (r'(\d+)\s+thousand', r'\1 هزار'),
-    (r'(\d+)\s+trillion', r'\1 تریلیون'),
-    (r'According to\s+(.+)', r'به گفته \1'),
-    (r'As reported by\s+(.+)', r'به گزارش \1'),
-    (r'Reuters reported', 'خبرگزاری رویترز گزارش داد'),
-    (r'BBC reported', 'بی‌بی‌سی گزارش داد'),
-    (r'CNN reported', 'سی‌ان‌ان گزارش داد'),
-]
 
 # ==================== تنظیمات وایرال ====================
 VIRAL_SIMILARITY_THRESHOLD = 0.55
@@ -239,25 +145,17 @@ PUBLISH_CYCLE_SLOTS = [
     {'type': 'domestic', 'category': 'اقتصادی', 'weight': 4},
     {'type': 'domestic', 'category': 'حوادث', 'weight': 4},
     {'type': 'domestic', 'category': 'بین‌الملل', 'weight': 4},
-    {'type': 'international', 'category': 'سیاسی', 'weight': 4},
-    {'type': 'international', 'category': 'اقتصادی', 'weight': 4},
-    {'type': 'international', 'category': 'بین‌الملل', 'weight': 4},
-    {'type': 'international', 'category': 'حوادث', 'weight': 4},
     {'type': 'domestic', 'category': 'ورزشی', 'weight': 4},
     {'type': 'domestic', 'category': 'بهداشت', 'weight': 4},
     {'type': 'domestic', 'category': 'فناوری', 'weight': 4},
     {'type': 'domestic', 'category': 'عمومی', 'weight': 4},
-    {'type': 'international', 'category': 'ورزشی', 'weight': 2},
-    {'type': 'international', 'category': 'عمومی', 'weight': 2},
 ]
 
 # ==================== تنظیمات مخزن ====================
 DAILY_NEWS_LIMIT = 500
-DAILY_INTERNATIONAL_LIMIT = 25
 MAX_POOL_SIZE = 1500
 AUTO_CLEANUP_THRESHOLD = 250
 OLD_NEWS_HOURS = 6
-INTERNATIONAL_MAX_KEEP = 30
 
 # ==================== تشخیص تکراری ====================
 SIMILARITY_THRESHOLD = 0.65
@@ -331,12 +229,6 @@ SOURCE_NAME_MAPPING = {
     'فارس': 'فارس',
     'خبرآنلاین': 'خبرآنلاین',
     'خبرگزاری جوان': 'خبرگزاری جوان',
-    'BBC': 'BBC',
-    'Reuters': 'Reuters',
-    'CNN': 'CNN',
-    'Al Jazeera': 'Al Jazeera',
-    'الجزیره': 'Al Jazeera',
-    'رویترز': 'Reuters',
 }
 
 
@@ -475,12 +367,10 @@ class BalancedNewsPool:
         self.domestic_news['عمومی'] = []
         self.domestic_post_count = {cat: 0 for cat in NEWS_CATEGORIES}
         self.domestic_post_count['عمومی'] = 0
-        self.international_news = []
         self.breaking_queue = []
         self.viral_queue = []
 
         self.last_domestic_source = None
-        self.last_international_source = None
         self.last_domestic_category = None
         self.cycle_index = 0
         self.cycle_slots = PUBLISH_CYCLE_SLOTS
@@ -502,7 +392,7 @@ class BalancedNewsPool:
             except:
                 pass
 
-    def check_and_mark_viral(self, title, source, is_international=False):
+    def check_and_mark_viral(self, title, source):
         normalized = re.sub(r'[^\w\s]', '', title.lower().strip())
         normalized = re.sub(r'\s+', ' ', normalized)
         if source not in self.recent_titles_by_source:
@@ -510,9 +400,6 @@ class BalancedNewsPool:
         viral_count = 0
         for other_source, titles in self.recent_titles_by_source.items():
             if other_source == source:
-                continue
-            other_is_intl = other_source.startswith('🌍')
-            if is_international != other_is_intl:
                 continue
             for other_title in titles:
                 other_norm = re.sub(r'[^\w\s]', '', other_title.lower().strip())
@@ -538,10 +425,6 @@ class BalancedNewsPool:
                 item for item in self.domestic_news[category]
                 if item.get('fetched_at', datetime.now()) > cutoff_time
             ]
-        self.international_news = [
-            item for item in self.international_news
-            if item.get('fetched_at', datetime.now()) > cutoff_time
-        ]
         self.viral_queue = [
             item for item in self.viral_queue
             if item.get('fetched_at', datetime.now()) > cutoff_time
@@ -552,8 +435,6 @@ class BalancedNewsPool:
                 if cat in self.domestic_news and len(self.domestic_news[cat]) > 5:
                     keep = max(5, int(len(self.domestic_news[cat]) * 0.3))
                     self.domestic_news[cat] = self.domestic_news[cat][:keep]
-        if len(self.international_news) > INTERNATIONAL_MAX_KEEP:
-            self.international_news = self.international_news[:INTERNATIONAL_MAX_KEEP]
         if len(self.viral_queue) > 50:
             self.viral_queue = self.viral_queue[:50]
         size_final = self.size()
@@ -636,62 +517,16 @@ class BalancedNewsPool:
     def domestic_size(self):
         return sum(len(v) for v in self.domestic_news.values())
 
-    def add_international(self, item):
-        self.smart_cleanup()
-        self.international_news.append(item)
-
-    def get_next_international(self, preferred_category=None, avoid_source=None):
-        if not self.international_news:
-            return None
-        def priority_score(item):
-            cat = item.get('category', 'عمومی')
-            score = 0
-            if cat == 'سیاسی':
-                score = 100
-            elif cat == 'بین‌الملل':
-                score = 80
-            elif cat == 'اقتصادی':
-                score = 60
-            elif cat == 'حوادث':
-                score = 40
-            else:
-                score = 20
-            if item.get('is_viral'):
-                score += 50
-            if preferred_category and cat == preferred_category:
-                score += 30
-            return score
-        sorted_news = sorted(
-            self.international_news,
-            key=priority_score,
-            reverse=True
-        )
-        for i, item in enumerate(sorted_news):
-            if item.get('source') != avoid_source:
-                for j, orig_item in enumerate(self.international_news):
-                    if orig_item is item:
-                        self.international_news.pop(j)
-                        self.last_international_source = item.get('source')
-                        return item
-        if self.international_news:
-            item = self.international_news.pop(0)
-            self.last_international_source = item.get('source')
-            return item
-        return None
-
-    def international_size(self):
-        return len(self.international_news)
-
     # ==================== ✅ متد جدید برای الگوریتم 2 ====================
     def get_next_from_source(self, source_name):
         """✅ دریافت اولین خبر از منبع مشخص (برای الگوریتم چرخش منبع)
         
         Args:
-            source_name: نام منبع (مثلاً 'ایرنا', 'BBC', 'CNN')
+            source_name: نام منبع (مثلاً 'ایرنا', 'مهر')
         
         Returns:
             tuple: (item, source_type) یا (None, None)
-            source_type: 'domestic' یا 'international'
+            source_type: همیشه 'domestic'
         """
         if not source_name:
             return None, None
@@ -705,14 +540,6 @@ class BalancedNewsPool:
                     self.domestic_post_count[cat] += 1
                     self.last_domestic_source = source_name
                     return item, 'domestic'
-        
-        # ✅ جستجو در اخبار بین‌المللی (با پیشوند 🌍)
-        intl_source = f'🌍 {source_name}'
-        for i, item in enumerate(self.international_news):
-            if item.get('source') == intl_source or item.get('source') == source_name:
-                self.international_news.pop(i)
-                self.last_international_source = source_name
-                return item, 'international'
         
         return None, None
 
@@ -740,38 +567,21 @@ class BalancedNewsPool:
             item = self.get_next_domestic(avoid_source=self.last_domestic_source)
             if item:
                 return item, 'domestic'
-        if slot_type == 'international':
-            preferred_cat = slot.get('category')
-            item = self.get_next_international(
-                preferred_category=preferred_cat,
-                avoid_source=self.last_international_source
-            )
-            if item:
-                return item, 'international'
-            item = self.get_next_international(avoid_source=self.last_international_source)
-            if item:
-                return item, 'international'
         if self.has_viral():
             return self.get_next_viral(), 'viral'
         if self.domestic_size() > 0:
             item = self.get_next_domestic(avoid_source=self.last_domestic_source)
             if item:
                 return item, 'domestic'
-        if self.international_size() > 0:
-            item = self.get_next_international(avoid_source=self.last_international_source)
-            if item:
-                return item, 'international'
         return None, None
 
     def size(self):
-        return (self.domestic_size() + self.international_size() +
-                self.breaking_size() + self.viral_size())
+        return self.domestic_size() + self.breaking_size() + self.viral_size()
 
     def get_stats(self):
         stats = {cat: len(items) for cat, items in self.domestic_news.items()}
         stats['🚨 Breaking'] = self.breaking_size()
         stats['🔥 Viral'] = self.viral_size()
-        stats['🌍 International'] = self.international_size()
         return stats
 
 
@@ -795,12 +605,10 @@ class SmartNewsBot:
         self.daily_posts = 0
         self.hourly_posts = 0
         self.hourly_reset_time = datetime.now()
-        self.daily_international_posts = 0
         self.last_reset_date = datetime.now().date()
         self.total_fetched = 0
         self.total_duplicates = 0
         self.total_videos_posted = 0
-        self.total_international_fetched = 0
         self.total_filtered_provinces = 0
         self.total_breaking_posted = 0
         self.source_stats = {}
@@ -813,8 +621,6 @@ class SmartNewsBot:
         self.last_fetch_time = None
         self.news_pool.set_log_callback(log_callback)
 
-        self.translation_stats = {'google': 0, 'failed': 0}
-        self._translator_executor = ThreadPoolExecutor(max_workers=3)
 
         # ✅ ✅ ✅ تنظیمات الگوریتم‌ها
         self.current_algorithm = ALGORITHM_SMART_PRIORITY  # الگوریتم پیش‌فرض
@@ -939,15 +745,13 @@ class SmartNewsBot:
         self.sent_titles = list(data.get('sent_titles', []))[-500:]
         self.sent_hashes = set(data.get('sent_hashes', []))
         self.daily_posts = int(data.get('daily_posts', 0))
-        self.daily_international_posts = int(data.get('daily_international_posts', 0))
         try:
             self.last_reset_date = datetime.fromisoformat(
                 data.get('last_reset_date', '')).date()
         except Exception:
             pass
         for key in ('total_fetched', 'total_duplicates', 'total_videos_posted',
-                    'total_international_fetched', 'total_filtered_provinces',
-                    'total_breaking_posted'):
+                    'total_filtered_provinces', 'total_breaking_posted'):
             setattr(self, key, int(data.get(key, 0)))
         self.source_stats = dict(data.get('source_stats', {}))
         self.log(f'📂 State loaded: {len(self.sent_links)} sent links (جلوگیری از ارسال تکراری)')
@@ -963,12 +767,10 @@ class SmartNewsBot:
                 'sent_titles': self.sent_titles[-500:],
                 'sent_hashes': list(self.sent_hashes)[-STATE_MAX_LINKS:],
                 'daily_posts': self.daily_posts,
-                'daily_international_posts': self.daily_international_posts,
                 'last_reset_date': self.last_reset_date.isoformat(),
                 'total_fetched': self.total_fetched,
                 'total_duplicates': self.total_duplicates,
                 'total_videos_posted': self.total_videos_posted,
-                'total_international_fetched': self.total_international_fetched,
                 'total_filtered_provinces': self.total_filtered_provinces,
                 'total_breaking_posted': self.total_breaking_posted,
                 'source_stats': self.source_stats,
@@ -1036,170 +838,12 @@ class SmartNewsBot:
             pass
         return None
 
-    # ==================== ترجمه ====================
-    def _translate_sync(self, text, src="en", tgt="fa"):
-        try:
-            translator = GoogleTranslator(source=src, target=tgt)
-            result = translator.translate(text)
-            return result
-        except Exception as e:
-            return None
-
-    async def _smart_translate(self, text, max_words=40, src="en", tgt="fa", is_title=False):
-        if not text or not text.strip():
-            return None
-
-        words = text.split()
-        if len(words) > max_words * 2:
-            text = " ".join(words[:max_words * 2])
-
-        for attempt in range(TRANSLATION_MAX_RETRIES):
-            try:
-                loop = asyncio.get_event_loop()
-                result = await loop.run_in_executor(
-                    self._translator_executor,
-                    self._translate_sync,
-                    text, src, tgt
-                )
-
-                if not result:
-                    await asyncio.sleep(TRANSLATION_RETRY_DELAY)
-                    continue
-
-                result = self._apply_news_style(result, text, is_title=is_title)
-                result = self._clean_translation(result)
-
-                if result:
-                    self.translation_stats['google'] += 1
-                    preview = result[:60] + "..." if len(result) > 60 else result
-                    self.log(f"✅ ترجمه: {preview}")
-                    return result
-
-            except Exception as e:
-                self.log(f"⚠️ خطای ترجمه (تلاش {attempt+1}): {e}")
-                await asyncio.sleep(TRANSLATION_RETRY_DELAY)
-
-        self.translation_stats['failed'] += 1
-        self.log(f"❌ ترجمه ناموفق: {text[:40]}...")
-        return None
-
-    def _apply_news_style(self, translated_text, original_text, is_title=False):
-        result = translated_text
-        for pattern, replacement in NEWS_PATTERNS:
-            try:
-                result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
-            except:
-                pass
-        result = self._convert_numbers_to_persian(result)
-        result = self._fix_punctuation(result)
-        result = self._remove_extra_words(result)
-        if is_title:
-            result = self._optimize_title(result)
-        else:
-            result = self._ensure_verb_ending(result)
-        return result
-
-    def _optimize_title(self, title):
-        if not title:
-            return title
-        if title.startswith("که "):
-            title = title[3:]
-        if title.startswith("در "):
-            title = title[3:]
-        title = title.strip()
-        if title and not title.endswith(('؟', '!', '.', '؛')):
-            if len(title.split()) >= 3:
-                verb_suffixes = ['کرد', 'شد', 'بود', 'گفت', 'داد', 'گرفت', 'آمد', 'رفت',
-                                'داشت', 'خواست', 'توانست', 'گردید', 'یافت', 'کردند',
-                                'شدند', 'بودند', 'گفتند', 'دادند', 'گرفتند']
-                has_verb = any(title.endswith(v) or title.endswith(v + '.') for v in verb_suffixes)
-                if not has_verb and not title.endswith(('.', '؟', '!')):
-                    if any(w in title for w in ['اعلام', 'گفت', 'بیان']):
-                        if not title.endswith('کرد'):
-                            title += ' کرد'
-                    elif any(w in title for w in ['شروع', 'آغاز']):
-                        if not title.endswith('شد'):
-                            title += ' شد'
-        if title.endswith('.'):
-            title = title[:-1].strip()
-        words = title.split()
-        if len(words) > TRANSLATION_TITLE_MAX_WORDS:
-            title = ' '.join(words[:TRANSLATION_TITLE_MAX_WORDS])
-        return title.strip()
-
-    def _convert_numbers_to_persian(self, text):
-        english_to_persian = {
-            '0': '۰', '1': '۱', '2': '۲', '3': '۳', '4': '۴',
-            '5': '۵', '6': '۶', '7': '۷', '8': '۸', '9': '۹',
-        }
-        for eng, per in english_to_persian.items():
-            text = text.replace(eng, per)
-        return text
-
-    def _fix_punctuation(self, text):
-        replacements = [
-            (',', '،'), (';', '؛'), ('?', '؟'),
-            ('"', '"'), ('"', '"'), ("'", '''), ("'", '''),
-        ]
-        for eng, fa in replacements:
-            text = text.replace(eng, fa)
-        text = re.sub(r'\s+([،؛؟!.])', r'\1', text)
-        text = re.sub(r'([،؛؟!.])([^\s])', r'\1 \2', text)
-        return text
-
-    def _remove_extra_words(self, text):
-        duplicates = [
-            'که که', 'را را', 'از از', 'به به', 'در در',
-            'این این', 'آن آن', 'با با', 'و و', 'بر بر',
-        ]
-        for duplicate in duplicates:
-            word = duplicate.split()[0]
-            text = text.replace(duplicate, word)
-        text = re.sub(r'\s+', ' ', text).strip()
-        return text
-
-    def _ensure_verb_ending(self, text):
-        if not text:
-            return text
-        text = text.strip()
-        verb_endings = [
-            'کرد', 'شد', 'بود', 'گفت', 'داد', 'گرفت', 'آمد', 'رفت',
-            'داشت', 'خواست', 'توانست', 'گردید', 'یافت', 'کردند',
-            'شدند', 'بودند', 'گفتند', 'دادند', 'گرفتند', 'آمدند',
-            'رفتند', 'داشتند', 'خواستند', 'توانستند', 'گردیدند', 'یافتند',
-        ]
-        if text and not any(text.rstrip('.؟!').endswith(ending) for ending in verb_endings):
-            if len(text.split()) > 3:
-                if not text.endswith(('.', '؟', '!')):
-                    if not text.endswith('کرد') and not text.endswith('شد'):
-                        text += ' کرد'
-        return text
-
-    def _clean_translation(self, text):
-        if not text:
-            return ""
-        prefixes_to_remove = [
-            "Persian Translation:", "ترجمه:", "ترجمه فارسی:",
-            "Translation:", "Output:", "خروجی:", "پاسخ:", "ترجمه به فارسی:",
-        ]
-        for prefix in prefixes_to_remove:
-            if text.startswith(prefix):
-                text = text[len(prefix):].strip()
-        text = text.strip('"').strip("'").strip('«').strip('»').strip()
-        lines = [line.strip() for line in text.split('\n') if line.strip()]
-        text = ' '.join(lines)
-        text = re.sub(r'\s+', ' ', text).strip()
-        for marker in ["Note:", "توضیح:", "Note that", "توجه:", "ترجمه تحت‌اللفظی:"]:
-            if marker in text:
-                text = text.split(marker)[0].strip()
-        return text
-
     # ==================== جمع‌آوری ====================
     async def fetch_all_news(self, is_initial=False):
         label = 'INITIAL' if is_initial else f'REFRESH #{self.cycle_count}'
         self.log(f'\n{"="*70}\n📥 FETCH - {label}\n{"="*70}')
         cycle_hashes = set()
-        n_breaking = n_domestic = n_intl = n_dup = 0
+        n_breaking = n_domestic = n_dup = 0
         self.log('\n🇮🇷 Domestic sources...\n')
         for source, url in NEWS_SOURCES.items():
             try:
@@ -1249,70 +893,19 @@ class SmartNewsBot:
                 self.rss_health_check[source] = 'offline'
                 self.log(f'❌ {source}: {e}')
 
-        self.log('\n🌍 International sources...\n')
-        for source, url in INTERNATIONAL_SOURCES.items():
-            try:
-                start_time = time.time()
-                feed = feedparser.parse(url)
-                response_time = (time.time() - start_time) * 1000
-                if not feed.entries:
-                    self.rss_health_check[source] = 'offline'
-                    continue
-                self.rss_health_check[source] = 'slow' if response_time > 3000 else 'online'
-                s_new = 0
-                for entry in feed.entries[:10]:
-                    title_en = getattr(entry, 'title', '').strip()
-                    link = entry.get('link', '')
-                    if not title_en:
-                        continue
-                    th = self._title_hash(title_en)
-                    if self._is_duplicate(title_en) or th in cycle_hashes or link in self.sent_links:
-                        continue
-                    cycle_hashes.add(th)
-                    summary_en = self._summarize(entry.get('summary', entry.get('description', '')), INTERNATIONAL_SUMMARY_WORDS)
-                    item = {
-                        'title_en': title_en, 'summary_en': summary_en, 'link': link,
-                        'source': f'🌍 {source}',
-                        'image_url': self._extract_image(entry) if INCLUDE_IMAGES else None,
-                        'video_url': self._extract_video(entry) if INCLUDE_VIDEOS else None,
-                        'is_international': True,
-                        'is_breaking': self._is_breaking_news(title_en, summary_en),
-                        'fetched_at': datetime.now(),
-                    }
-                    self.news_pool.add_international(item)
-                    s_new += 1
-                    n_intl += 1
-                    self.source_stats[source] = self.source_stats.get(source, 0) + 1
-                self.log(f'✅ {source}: {s_new} new ({response_time:.0f}ms)')
-                await asyncio.sleep(0.3)
-            except Exception as e:
-                self.rss_health_check[source] = 'offline'
-                self.log(f'❌ {source}: {e}')
-
         self.log('\n🔥 Checking for viral news...')
         viral_detected = 0
         for cat in list(self.news_pool.domestic_news.keys()):
             items = self.news_pool.domestic_news[cat]
             keep_items = []
             for item in items:
-                if self.news_pool.check_and_mark_viral(item['title'], item['source'], False):
+                if self.news_pool.check_and_mark_viral(item['title'], item['source']):
                     viral_detected += 1
                     self.news_pool.add_viral(item)
                     self.log(f"🔥 VIRAL [FA]: {item['title'][:50]}...")
                 else:
                     keep_items.append(item)
             self.news_pool.domestic_news[cat] = keep_items
-
-        keep_intl = []
-        for item in self.news_pool.international_news:
-            if self.news_pool.check_and_mark_viral(item['title_en'], item['source'], True):
-                viral_detected += 1
-                item['category'], item['emoji'] = self._detect_category(item['title_en'], item.get('summary_en', ''))
-                self.news_pool.add_viral(item)
-                self.log(f"🔥 VIRAL [EN]: {item['title_en'][:50]}...")
-            else:
-                keep_intl.append(item)
-        self.news_pool.international_news = keep_intl
 
         if viral_detected > 0:
             self.log(f"🔥 Total viral news detected: {viral_detected}")
@@ -1321,9 +914,8 @@ class SmartNewsBot:
 
         self.total_fetched += n_domestic
         self.total_duplicates += n_dup
-        self.total_international_fetched += n_intl
         self.last_fetch_time = datetime.now()
-        self.log(f'\n📊 FETCH DONE | 🚨{n_breaking} 📰{n_domestic} 🌍{n_intl} 🔄{n_dup} 📦pool={self.news_pool.size()}\n')
+        self.log(f'\n📊 FETCH DONE | 🚨{n_breaking} 📰{n_domestic} 🔄{n_dup} 📦pool={self.news_pool.size()}\n')
 
     def _reset_hourly(self):
         now = datetime.now()
@@ -1336,32 +928,12 @@ class SmartNewsBot:
         source = news.get('source', '')
         title = news.get('title', '')
         summary = news.get('summary', '')
-        link = news.get('link', '')
         emoji = news.get('emoji', '📰')
         header = '🔴 🚨🚨 خبر فوری\n\n' if news.get('is_breaking') else ''
         return (
             f'{header}{emoji} {title}\n\n'
             f'{summary}\n\n'
-            f'📌 منبع: {source}\n'
-            f'🔗 لینک خبر: {link}\n\n'
-            f'📢 {self.channel_id}'
-        ).strip()
-
-    async def _format_international_short(self, news):
-        source = news.get('source', '')
-        title = news.get('title', '')
-        summary = news.get('summary', '')
-        link = news.get('link', '')
-        emoji = news.get('emoji', '🌍')
-        short_summary = summary.split('.')[0] if summary else ''
-        if len(short_summary) > 100:
-            short_summary = short_summary[:97] + '...'
-        header = '🔴 🌐 خبر فوری بین‌الملل\n\n' if news.get('is_breaking') else ''
-        return (
-            f'{header}{emoji} {title}\n\n'
-            f'📰 {short_summary}\n\n'
-            f'🔗 منبع: {source}\n'
-            f'🔍 جزئیات: {link}\n\n'
+            f'📌 منبع: {source}\n\n'
             f'📢 {self.channel_id}'
         ).strip()
 
@@ -1369,14 +941,12 @@ class SmartNewsBot:
         source = news.get('source', '')
         title = news.get('title', '')
         summary = news.get('summary', '')
-        link = news.get('link', '')
         emoji = news.get('emoji', '🔥')
         header = '🔴 🔥🔥 خبر وایرال - بازتاب گسترده\n\n'
         return (
             f'{header}{emoji} {title}\n\n'
             f'{summary}\n\n'
-            f'📌 منبع: {source}\n'
-            f'🔗 لینک خبر: {link}\n\n'
+            f'📌 منبع: {source}\n\n'
             f'📢 {self.channel_id}'
         ).strip()
 
@@ -1384,7 +954,6 @@ class SmartNewsBot:
         today = datetime.now().date()
         if today > self.last_reset_date:
             self.daily_posts = 0
-            self.daily_international_posts = 0
             self.last_reset_date = today
             self.source_stats = {}
         self._reset_hourly()
@@ -1412,42 +981,9 @@ class SmartNewsBot:
         if self.daily_posts >= DAILY_NEWS_LIMIT:
             return False
         try:
-            if news.get('is_international') or 'title_en' in news:
-                self.log(f'🔥 ترجمه خبر وایرال خارجی...')
-                t_title = await self._smart_translate(
-                    news.get('title_en', news.get('title', '')),
-                    max_words=TRANSLATION_TITLE_MAX_WORDS,
-                    is_title=True
-                )
-                t_summary = await self._smart_translate(
-                    news.get('summary_en', news.get('summary', '')),
-                    max_words=TRANSLATION_SUMMARY_MAX_WORDS,
-                    is_title=False
-                )
-                if not t_title:
-                    return False
-                if not t_summary:
-                    t_summary = t_title
-                is_brk = self._is_breaking_news(t_title, t_summary)
-                cat, emoji = self._detect_category(t_title, t_summary)
-                final_news = {
-                    'title': t_title,
-                    'summary': t_summary,
-                    'link': news.get('link', ''),
-                    'source': news.get('source', ''),
-                    'image_url': news.get('image_url'),
-                    'category': cat,
-                    'emoji': '🔥' if not is_brk else '🚨',
-                    'is_breaking': is_brk,
-                    'is_viral': True,
-                }
-                if is_brk:
-                    return await self._send_breaking(final_news)
-                msg = self._format_viral(final_news)
-            else:
-                news['emoji'] = '🔥'
-                news['is_viral'] = True
-                msg = self._format_viral(news)
+            news['emoji'] = '🔥'
+            news['is_viral'] = True
+            msg = self._format_viral(news)
 
             if INCLUDE_IMAGES and news.get('image_url'):
                 try:
@@ -1465,11 +1001,11 @@ class SmartNewsBot:
                     chat_id=self.channel_id, text=msg
                 )
             self.sent_links.add(news.get('link', ''))
-            self._mark_sent(news.get('title', news.get('title_en', '')))
+            self._mark_sent(news.get('title', ''))
             self.daily_posts += 1
             self.hourly_posts += 1
             self._save_state()
-            self.log(f'🔥 VIRAL SENT: {news.get("title", news.get("title_en", ""))[:50]}...')
+            self.log(f'🔥 VIRAL SENT: {news.get("title", "")[:50]}...')
             return True
         except Exception as e:
             self.log(f'❌ خطای ارسال وایرال: {e}')
@@ -1521,71 +1057,6 @@ class SmartNewsBot:
             self.log(f'❌ post: {e}')
             return False
 
-    async def _send_international_direct(self, news):
-        self._reset_counters()
-        if self.daily_international_posts >= DAILY_INTERNATIONAL_LIMIT:
-            return False
-        try:
-            if news['link'] in self.sent_links:
-                return False
-            self.log(f'🌍 ترجمه خبر بین‌المللی...')
-            t_title = await self._smart_translate(
-                news['title_en'],
-                max_words=TRANSLATION_TITLE_MAX_WORDS,
-                is_title=True
-            )
-            t_summary = await self._smart_translate(
-                news['summary_en'],
-                max_words=TRANSLATION_SUMMARY_MAX_WORDS,
-                is_title=False
-            )
-            if not t_title:
-                self.log('❌ ترجمه عنوان ناموفق')
-                return False
-            if not t_summary:
-                t_summary = t_title
-            is_brk = news.get('is_breaking') or self._is_breaking_news(t_title, t_summary)
-            cat, emoji = self._detect_category(t_title, t_summary)
-            final_news = {
-                'title': t_title,
-                'summary': t_summary,
-                'link': news['link'],
-                'source': news['source'],
-                'image_url': news.get('image_url'),
-                'category': cat,
-                'emoji': '🚨' if is_brk else emoji,
-                'is_breaking': is_brk,
-            }
-            if is_brk:
-                return await self._send_breaking(final_news)
-            msg = await self._format_international_short(final_news)
-            if INCLUDE_IMAGES and final_news.get('image_url'):
-                try:
-                    await self.bot.send_photo(
-                        chat_id=self.channel_id,
-                        photo=final_news['image_url'],
-                        caption=msg[:RUBIKA_MAX_CAPTION_LENGTH]
-                    )
-                except:
-                    await self.bot.send_message(
-                        chat_id=self.channel_id, text=msg
-                    )
-            else:
-                await self.bot.send_message(
-                    chat_id=self.channel_id, text=msg
-                )
-            self.sent_links.add(final_news['link'])
-            self._mark_sent(final_news['title'])
-            self.daily_international_posts += 1
-            self.daily_posts += 1
-            self.hourly_posts += 1
-            self._save_state()
-            self.log(f'✅ [🌍 {cat}] {t_title[:50]}...')
-            return True
-        except Exception as e:
-            self.log(f'❌ خطای ارسال بین‌المللی: {e}')
-            return False
-
     # ==================== ✅ الگوریتم 1: Smart Priority Loop ====================
     async def publish_loop_smart_priority(self):
         """✅ الگوریتم 1: Smart Priority (بدون تغییر)"""
@@ -1625,8 +1096,6 @@ class SmartNewsBot:
                 sent = await self._send_viral(news)
             elif news_type == 'domestic':
                 sent = await self._send_domestic_direct(news)
-            elif news_type == 'international':
-                sent = await self._send_international_direct(news)
             if not sent:
                 continue
             delay = random.randint(MIN_POST_DELAY, MAX_POST_DELAY)
@@ -1703,7 +1172,7 @@ class SmartNewsBot:
                     continue
                 
                 # ✅ بررسی تکراری نبودن (اضافه برای اطمینان)
-                title_to_check = news.get('title') or news.get('title_en', '')
+                title_to_check = news.get('title', '')
                 if self._is_duplicate(title_to_check):
                     self.log(f'🔄 Duplicate news from [{source_name}] → Skip')
                     self.rotation_step = (self.rotation_step + 2) % self.rotation_cycle_length
@@ -1714,8 +1183,6 @@ class SmartNewsBot:
                 sent = False
                 if news_type == 'domestic':
                     sent = await self._send_domestic_direct(news)
-                elif news_type == 'international':
-                    sent = await self._send_international_direct(news)
                 
                 if sent:
                     self.log(f'✅ Step {step_number}: Published from [{source_name}]')
@@ -1775,12 +1242,12 @@ class SmartNewsBot:
                 self.log('⚠️ مطمئن شوید ربات در کانال روبیکا عضو و ادمین باشد')
             self.log(f'⏱️ Interval: {self.fetch_interval//60}m')
             self.log(f'⏸️ Post delay: {MIN_POST_DELAY}-{MAX_POST_DELAY}s')
-            self.log(f'🌍 Translation: Google Translate + News Style')
             self.log(f'🔥 Viral Detection: Active')
-            self.log(f'🧠 Algorithm 1: Smart Priority (20-Stage)')
+            self.log(f'🧠 Algorithm 1: Smart Priority ({len(PUBLISH_CYCLE_SLOTS)}-Stage)')
             self.log(f'🔁 Algorithm 2: Source Rotation ({self.rotation_cycle_length} steps)')
             self.log(f'🎯 Active Algorithm: {self.get_algorithm_name()}')
             self.log(f'📤 مقصد انتشار: فقط کانال روبیکا')
+            self.log(f'🇮🇷 منابع: فقط داخلی | بدون لینک خبر در پست‌ها')
             self.log('=' * 70 + '\n')
         except Exception as e:
             self.rubika_connected = False

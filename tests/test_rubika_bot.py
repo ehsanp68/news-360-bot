@@ -158,7 +158,9 @@ async def test_smart_bot(base_url):
     text = received["messages"][-1]["text"]
     assert "<b>" not in text and "<a href" not in text and "&amp;" not in text, "پیام باید متن ساده باشد"
     assert CHANNEL in text and "ایرنا" in text
-    print("✅ domestic post → Rubika channel (plain text) OK")
+    assert news["link"] not in text and "لینک خبر" not in text, "لینک خبر نباید در پست باشد"
+    assert "http" not in text, "هیچ لینکی نباید در پست باشد"
+    print("✅ domestic post → Rubika channel (plain text, NO link) OK")
 
     # duplicate link must not be sent twice
     ok2 = await news_bot._send_domestic_direct(dict(news))
@@ -185,20 +187,8 @@ async def test_smart_bot(base_url):
     viral = dict(news, link="https://example.com/news/5", is_viral=True)
     ok = await news_bot._send_viral(viral)
     assert ok and "وایرال" in received["messages"][-1]["text"]
-    print("✅ viral post OK")
-
-    # international (translate mocked - no real internet needed)
-    async def fake_translate(text, max_words=40, src="en", tgt="fa", is_title=False):
-        return "ترجمه آزمایشی " + ("عنوان" if is_title else "خلاصه خبر")
-    news_bot._smart_translate = fake_translate
-    intl = {
-        "title_en": "Test international headline", "summary_en": "Some summary.",
-        "link": "https://example.com/news/6", "source": "🌍 BBC",
-        "is_international": True, "is_breaking": False,
-    }
-    ok = await news_bot._send_international_direct(intl)
-    assert ok and CHANNEL in received["messages"][-1]["text"]
-    print("✅ international post (translated) OK")
+    assert "http" not in received["messages"][-1]["text"], "پست وایرال هم نباید لینک داشته باشد"
+    print("✅ viral post (no link) OK")
 
     # image failure must fall back to text message
     bad_photo = dict(news, link="https://example.com/news/7",
@@ -208,6 +198,24 @@ async def test_smart_bot(base_url):
     print("✅ photo failure falls back to text OK")
 
     await news_bot.bot.close()
+
+
+def test_domestic_only():
+    # هیچ منبع خارجی نباید باقی مانده باشد
+    assert not hasattr(bot_module, "INTERNATIONAL_SOURCES"), "منابع خارجی باید حذف شده باشند"
+    assert not hasattr(bot_module, "TRANSLATION_MAX_RETRIES"), "تنظیمات ترجمه باید حذف شده باشند"
+    assert not hasattr(SmartNewsBot, "_send_international_direct")
+    assert not hasattr(SmartNewsBot, "_smart_translate")
+    # چرخش منبع فقط باید به منابع داخلی اشاره کند
+    for step_type, source, _wait in bot_module.SOURCE_ROTATION_CYCLE:
+        if step_type == "publish":
+            assert source in bot_module.NEWS_SOURCES, f"منبع خارجی در چرخش: {source}"
+    # چرخه انتشار نباید اسلات بین‌المللی داشته باشد
+    for slot in bot_module.PUBLISH_CYCLE_SLOTS:
+        assert slot.get("type") != "international"
+    print(f"✅ domestic-only: {len(bot_module.NEWS_SOURCES)} sources, "
+          f"{len(bot_module.SOURCE_ROTATION_CYCLE)} rotation steps, "
+          f"{len(bot_module.PUBLISH_CYCLE_SLOTS)} cycle slots (no foreign sources)")
 
 
 def test_config():
@@ -247,6 +255,7 @@ def test_config():
 
 async def main():
     test_config()
+    test_domestic_only()
     runner, base_url = await start_mock_server()
     old_state = bot_module.STATE_FILE
     try:
