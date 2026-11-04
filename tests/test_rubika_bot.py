@@ -210,12 +210,106 @@ def test_domestic_only():
     for step_type, source, _wait in bot_module.SOURCE_ROTATION_CYCLE:
         if step_type == "publish":
             assert source in bot_module.NEWS_SOURCES, f"منبع خارجی در چرخش: {source}"
-    # چرخه انتشار نباید اسلات بین‌المللی داشته باشد
-    for slot in bot_module.PUBLISH_CYCLE_SLOTS:
-        assert slot.get("type") != "international"
     print(f"✅ domestic-only: {len(bot_module.NEWS_SOURCES)} sources, "
-          f"{len(bot_module.SOURCE_ROTATION_CYCLE)} rotation steps, "
-          f"{len(bot_module.PUBLISH_CYCLE_SLOTS)} cycle slots (no foreign sources)")
+          f"{len(bot_module.SOURCE_ROTATION_CYCLE)} rotation steps (no foreign sources)")
+
+
+def test_single_algorithm():
+    # Smart Priority باید کاملاً حذف شده باشد؛ فقط Source Rotation بماند
+    assert not hasattr(bot_module, "ALGORITHM_SMART_PRIORITY")
+    assert not hasattr(bot_module, "PUBLISH_CYCLE_SLOTS")
+    assert not hasattr(SmartNewsBot, "publish_loop_smart_priority")
+    assert not hasattr(SmartNewsBot, "set_algorithm")
+    assert not hasattr(SmartNewsBot, "get_algorithm_name")
+    assert not hasattr(SmartNewsBot, "current_algorithm")
+    pool = bot_module.BalancedNewsPool()
+    assert not hasattr(pool, "get_next_by_cycle")
+    assert not hasattr(pool, "get_next_slot")
+    assert not hasattr(pool, "cycle_slots")
+    assert hasattr(SmartNewsBot, "publish_loop_source_rotation")
+    print("✅ single algorithm: Smart Priority removed, Source Rotation is the only publisher")
+
+
+def test_news_style():
+    b = SmartNewsBot.__new__(SmartNewsBot)
+    # اعداد فارسی + جداکننده هزارگان + نشانه‌گذاری فارسی + حذف تکرار
+    out = b._news_style("قیمت دلار به 50,000 تومان رسید ; بازار ملتهب است? خبر خبر", is_title=False)
+    assert "۵۰٬۰۰۰" in out and "؛" in out and "؟" in out and "خبر خبر" not in out
+    # نیم‌فاصله استاندارد
+    out = b._news_style("می گوید که کتاب ها ارزان می شود")
+    assert "می\u200cگوید" in out and "کتاب\u200cها" in out and "می\u200cشود" in out
+    # ی/ک عربی → فارسی
+    assert b._news_style("علي و كريم", is_title=True) == "علی و کریم"
+    # عنوان بدون نقطه پایانی، خلاصه با نقطه پایانی
+    assert b._news_style("خبر مهم.", is_title=True) == "خبر مهم"
+    assert b._news_style("خبر مهم") == "خبر مهم."
+    # اعشار و سه‌نقطه سالم بمانند
+    assert "۱.۵" in b._news_style("تورم 1.5 درصد شد")
+    assert b._news_style("ادامه دارد...") == "ادامه دارد..."
+    # idempotent: اجرای دوباره نباید چیزی را تغییر دهد
+    for text, is_title in [("زلزله ٤.٥ ریشتری تهران را لرزاند.", True),
+                           ("وزیر گفت:جلسه برگزار شد,و تصمیمات اعلام شد؟!", False)]:
+        once = b._news_style(text, is_title=is_title)
+        assert b._news_style(once, is_title=is_title) == once, f"not idempotent: {once!r}"
+    print("✅ news style: Persian digits/punctuation/half-space/cleanup, idempotent")
+
+
+def test_breaking_accuracy():
+    b = SmartNewsBot.__new__(SmartNewsBot)
+    positives = [
+        ("حمله موشکی به تهران", ""),
+        ("فوری: انفجار در خط لوله گاز پایتخت", ""),
+        ("زلزله ۵.۲ ریشتری تهران را لرزاند", ""),
+        ("ترور نافرجام یک مقام مسئول", ""),
+        ("زلزله شدید خوزستان را لرزاند", ""),
+    ]
+    negatives = [
+        ("تکذیب شایعه حمله به ایران", "منابع آگاه خبر حمله را تکذیب کردند"),
+        ("شایعه انفجار در پایتخت کذب است", ""),
+        ("جلسه عادی مجلس برگزار شد", "نمایندگان درباره بودجه بحث کردند"),
+        ("زلزله ۳ ریشتری در حومه تهران", ""),
+        ("برگزاری مانور نظامی در کویر", ""),
+        ("قیمت دلار امروز چند است؟", ""),
+    ]
+    for t, s in positives:
+        assert b._is_breaking_news(t, s), f"باید فوری می‌بود: {t}"
+    for t, s in negatives:
+        assert not b._is_breaking_news(t, s), f"نباید فوری می‌بود: {t}"
+    print(f"✅ breaking accuracy: {len(positives)} true positives, {len(negatives)} true negatives")
+
+
+def test_viral_accuracy():
+    from datetime import datetime, timedelta
+    t1 = "آتش سوزی گسترده در بازار بزرگ تهران مهار شد"
+    t2 = "مهار آتش سوزی بازار بزرگ تهران پس از چند ساعت"
+    t3 = "آتش\u200cسوزی بازار تهران مهار شد"
+    # همان رویداد در ۳ منبع → سومی وایرال است
+    pool = bot_module.BalancedNewsPool()
+    assert [pool.check_and_mark_viral(t, s)
+            for t, s in [(t1, "ایرنا"), (t2, "مهر"), (t3, "ایسنا")]] == [False, False, True]
+    # خبر نامرتبط → وایرال نیست
+    assert not pool.check_and_mark_viral("قیمت طلا در بازار امروز کاهش یافت", "فارس")
+    # تکرار از همان منبع → وایرال نیست
+    p2 = bot_module.BalancedNewsPool()
+    p2.check_and_mark_viral(t1, "ایرنا")
+    assert not p2.check_and_mark_viral(t2, "ایرنا")
+    # خارج از پنجره زمانی → وایرال نیست
+    p3 = bot_module.BalancedNewsPool()
+    old = datetime.now() - timedelta(hours=bot_module.VIRAL_TIME_WINDOW_HOURS + 4)
+    p3.recent_titles_by_source["ایرنا"] = [(t1, p3._viral_tokens(t1), old)]
+    p3.recent_titles_by_source["مهر"] = [(t2, p3._viral_tokens(t2), old)]
+    assert not p3.check_and_mark_viral(t3, "ایسنا")
+    # اعداد متفاوت → رویدادهای متفاوت → وایرال نیست
+    p4 = bot_module.BalancedNewsPool()
+    p4.check_and_mark_viral("زلزله ۳ ریشتری تهران را لرزاند", "ایرنا")
+    p4.check_and_mark_viral("زلزله ۶ ریشتری تهران را لرزاند", "مهر")
+    assert not p4.check_and_mark_viral("زلزله ۴ ریشتری تهران را لرزاند", "ایسنا")
+    # عدد یکسان + ۳ منبع → وایرال
+    p5 = bot_module.BalancedNewsPool()
+    p5.check_and_mark_viral("زلزله ۵.۲ ریشتری تهران را لرزاند", "ایرنا")
+    p5.check_and_mark_viral("زلزله ۵.۲ ریشتری در تهران", "مهر")
+    assert p5.check_and_mark_viral("تهران با زلزله ۵.۲ ریشتری لرزید", "ایسنا")
+    print("✅ viral accuracy: multi-source + time window + number guard + same-source guard")
 
 
 def test_config():
@@ -256,6 +350,10 @@ def test_config():
 async def main():
     test_config()
     test_domestic_only()
+    test_single_algorithm()
+    test_news_style()
+    test_breaking_accuracy()
+    test_viral_accuracy()
     runner, base_url = await start_mock_server()
     old_state = bot_module.STATE_FILE
     try:

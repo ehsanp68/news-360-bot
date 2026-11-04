@@ -87,7 +87,7 @@ async def test_cloud_runner(base_url, tmp):
             self.news_pool.add_domestic({
                 "title": "خبر ابری آزمایشی", "summary": "خلاصه",
                 "link": f"https://example.com/cloud/{datetime.now().timestamp()}",
-                "source": "مهر", "category": "عمومی", "emoji": "📰",
+                "source": "ایرنا", "category": "عمومی", "emoji": "📰",
                 "fetched_at": datetime.now(),
             })
             self.last_fetch_time = datetime.now()
