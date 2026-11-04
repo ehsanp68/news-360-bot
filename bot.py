@@ -1,37 +1,77 @@
 """
-Telegram News Bot - Dual Algorithm System
+Rubika News Bot - Dual Algorithm System
 ✅ Algorithm 1: Smart Priority (الگوریتم هوشمند اولویت‌دار)
 ✅ Algorithm 2: Source Rotation (الگوریتم چرخش منبع)
 ✅ Google Translate + News Style Post-Processing
 ✅ Viral Detection
 ✅ Source Diversity
+✅ انتشار فقط و فقط در کانال روبیکا (Rubika-only publishing)
 """
 import asyncio
 import feedparser
 from bs4 import BeautifulSoup
-from telegram import Bot
-from telegram.constants import ParseMode
 from datetime import datetime, timedelta
 import re
 from difflib import SequenceMatcher
 import hashlib
 import random
 import aiohttp
-import html
+import json
 import time
 import os
 import requests
 from deep_translator import GoogleTranslator
 from concurrent.futures import ThreadPoolExecutor
 
-# ==================== تنظیمات اصلی ====================
-BOT_TOKEN = "8902034273:AAEn3wJ-_r7htq7Jm4kXnv39a6qyZ_0n9iM"
-CHANNEL_USERNAME = "@news360_24"
+# ==================== تنظیمات اصلی (فقط روبیکا) ====================
+# این ربات اخبار را فقط و فقط در کانال روبیکا منتشر می‌کند.
+# هیچ شبکه اجتماعی دیگری (تلگرام، بله و ...) پشتیبانی نمی‌شود.
+#
+# روش‌های تنظیم توکن و کانال (به ترتیب اولویت):
+#   1) متغیرهای محیطی RUBIKA_BOT_TOKEN و RUBIKA_CHANNEL_ID
+#   2) فایل rubika_config.json (از طریق بخش RUBIKA SETTINGS در رابط گرافیکی)
+#   3) مقداردهی مستقیم همین‌جا:
+DEFAULT_RUBIKA_BOT_TOKEN = ""   # توکن ربات روبیکا (ساخت ربات از طریق BotFather روبیکا)
+DEFAULT_RUBIKA_CHANNEL_ID = ""  # آیدی کانال روبیکا، مثل: @news360_24
 
-if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
-    raise ValueError("توکن ربات تنظیم نشده!")
-if not CHANNEL_USERNAME or CHANNEL_USERNAME == "@your_channel":
-    raise ValueError("نام کانال تنظیم نشده!")
+RUBIKA_API_BASE = "https://botapi.rubika.ir/v3"
+CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rubika_config.json")
+
+
+def load_rubika_config():
+    """بارگذاری تنظیمات روبیکا: متغیر محیطی → فایل تنظیمات → مقدار پیش‌فرض"""
+    cfg = {}
+    try:
+        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+            cfg = json.load(f)
+    except Exception:
+        pass
+    token = (os.environ.get('RUBIKA_BOT_TOKEN') or cfg.get('bot_token')
+             or DEFAULT_RUBIKA_BOT_TOKEN or '').strip()
+    channel = (os.environ.get('RUBIKA_CHANNEL_ID') or cfg.get('channel_id')
+               or DEFAULT_RUBIKA_CHANNEL_ID or '').strip()
+    return token, channel
+
+
+def save_rubika_config(bot_token, channel_id):
+    """ذخیره تنظیمات روبیکا (توسط رابط گرافیکی استفاده می‌شود)"""
+    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+        json.dump({'bot_token': bot_token.strip(), 'channel_id': channel_id.strip()},
+                  f, ensure_ascii=False, indent=2)
+
+
+RUBIKA_BOT_TOKEN, RUBIKA_CHANNEL_ID = load_rubika_config()
+
+# ==================== محدودیت‌های ارسال روبیکا ====================
+RUBIKA_MAX_TEXT_LENGTH = 4000
+RUBIKA_MAX_CAPTION_LENGTH = 1000
+RUBIKA_MAX_MEDIA_BYTES = 20 * 1024 * 1024
+
+# ==================== وضعیت پایدار (برای اجرای ابری در GitHub Actions) ====================
+# بین نوبت‌های اجرا، لیست خبرهای ارسال‌شده ذخیره می‌شود تا خبر تکراری ارسال نشود.
+STATE_FILE = os.environ.get('BOT_STATE_FILE') or os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), 'state', 'bot_state.json')
+STATE_MAX_LINKS = 5000
 
 # ==================== ✅ نام الگوریتم‌ها ====================
 ALGORITHM_SMART_PRIORITY = "smart_priority"      # الگوریتم 1
@@ -298,6 +338,134 @@ SOURCE_NAME_MAPPING = {
     'الجزیره': 'Al Jazeera',
     'رویترز': 'Reuters',
 }
+
+
+# ==================== کلاینت API روبیکا ====================
+class RubikaAPIError(Exception):
+    """خطای API روبیکا"""
+
+
+class RubikaBot:
+    """کلاینت سبک و async برای API رسمی ربات روبیکا (Bot API v3)
+
+    آدرس: https://botapi.rubika.ir/v3/{token}/{method}
+    فقط متدهای موردنیاز این ربات پیاده‌سازی شده‌اند:
+    getMe, getChat, sendMessage, requestSendFile, sendFile
+
+    نکته: برخلاف تلگرام، API روبیکا لینک مستقیم رسانه قبول نمی‌کند؛
+    رسانه ابتدا دانلود، سپس آپلود و در نهایت با sendFile ارسال می‌شود.
+    """
+
+    def __init__(self, token, api_base=RUBIKA_API_BASE):
+        self.token = token
+        self.api_base = api_base.rstrip('/')
+        self._session = None
+
+    async def _get_session(self):
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=120)
+            )
+        return self._session
+
+    async def close(self):
+        if self._session and not self._session.closed:
+            await self._session.close()
+        self._session = None
+
+    async def _call(self, method, payload=None):
+        url = f'{self.api_base}/{self.token}/{method}'
+        session = await self._get_session()
+        async with session.post(url, json=payload or {}) as resp:
+            try:
+                body = await resp.json(content_type=None)
+            except Exception:
+                body = {}
+            if resp.status != 200 or body.get('status') != 'OK':
+                detail = body.get('status_det') or body.get('status') or 'unknown error'
+                raise RubikaAPIError(f'{method}: HTTP {resp.status} | {detail}')
+            return body.get('data', {}) or {}
+
+    async def get_me(self):
+        """اطلاعات ربات - برای تست اتصال"""
+        return await self._call('getMe')
+
+    async def get_chat(self, chat_id):
+        """اطلاعات کانال/گفتگو - برای بررسی دسترسی ربات به کانال"""
+        data = await self._call('getChat', {'chat_id': chat_id})
+        return data.get('chat', {}) or {}
+
+    async def send_message(self, chat_id, text):
+        """ارسال پیام متنی به کانال روبیکا"""
+        text = (text or '').strip()
+        if not text:
+            raise RubikaAPIError('sendMessage: متن خالی است')
+        if len(text) > RUBIKA_MAX_TEXT_LENGTH:
+            text = text[:RUBIKA_MAX_TEXT_LENGTH - 1] + '…'
+        return await self._call('sendMessage', {'chat_id': chat_id, 'text': text})
+
+    async def _download_media(self, url):
+        session = await self._get_session()
+        async with session.get(url, headers={'User-Agent': 'Mozilla/5.0'}) as resp:
+            if resp.status != 200:
+                raise RubikaAPIError(f'دانلود رسانه ناموفق: HTTP {resp.status}')
+            data = await resp.read()
+            if not data:
+                raise RubikaAPIError('دانلود رسانه ناموفق: فایل خالی')
+            if len(data) > RUBIKA_MAX_MEDIA_BYTES:
+                raise RubikaAPIError('حجم رسانه بیش از حد مجاز است')
+            return data
+
+    @staticmethod
+    def _guess_filename(url, default_name):
+        try:
+            name = url.split('?')[0].rstrip('/').split('/')[-1]
+            if name and '.' in name:
+                return name
+        except Exception:
+            pass
+        return default_name
+
+    async def _upload_media(self, file_bytes, file_name, media_type):
+        # مرحله 1: دریافت آدرس آپلود از روبیکا
+        data = await self._call('requestSendFile', {'type': media_type})
+        upload_url = data.get('upload_url')
+        if not upload_url:
+            raise RubikaAPIError('requestSendFile: آدرس آپلود دریافت نشد')
+        # مرحله 2: آپلود فایل (multipart)
+        session = await self._get_session()
+        form = aiohttp.FormData()
+        form.add_field('file', file_bytes, filename=file_name,
+                       content_type='application/octet-stream')
+        async with session.post(upload_url, data=form) as resp:
+            try:
+                body = await resp.json(content_type=None)
+            except Exception:
+                body = {}
+            file_id = (body.get('data') or {}).get('file_id')
+            if resp.status != 200 or not file_id:
+                raise RubikaAPIError(f'آپلود رسانه ناموفق: HTTP {resp.status}')
+        return file_id
+
+    async def _send_media(self, chat_id, media_url, caption, media_type, default_name):
+        """دانلود → آپلود → ارسال رسانه به کانال روبیکا"""
+        file_bytes = await self._download_media(media_url)
+        file_name = self._guess_filename(media_url, default_name)
+        file_id = await self._upload_media(file_bytes, file_name, media_type)
+        caption = (caption or '').strip()
+        if len(caption) > RUBIKA_MAX_CAPTION_LENGTH:
+            caption = caption[:RUBIKA_MAX_CAPTION_LENGTH - 1] + '…'
+        return await self._call('sendFile', {
+            'chat_id': chat_id, 'file_id': file_id, 'text': caption
+        })
+
+    async def send_photo(self, chat_id, photo, caption=None):
+        """ارسال عکس (از لینک) با کپشن به کانال روبیکا"""
+        return await self._send_media(chat_id, photo, caption, 'Image', 'news.jpg')
+
+    async def send_video(self, chat_id, video, caption=None):
+        """ارسال ویدیو (از لینک) با کپشن به کانال روبیکا"""
+        return await self._send_media(chat_id, video, caption, 'Video', 'news.mp4')
 
 
 # ==================== مخزن خبر ====================
@@ -609,8 +777,16 @@ class BalancedNewsPool:
 
 # ==================== ربات اصلی ====================
 class SmartNewsBot:
-    def __init__(self, log_callback=None):
-        self.bot = Bot(token=BOT_TOKEN)
+    def __init__(self, log_callback=None, bot_token=None, channel_id=None):
+        token = (bot_token or RUBIKA_BOT_TOKEN or '').strip()
+        channel = (channel_id or RUBIKA_CHANNEL_ID or '').strip()
+        if not token:
+            raise ValueError("توکن ربات روبیکا تنظیم نشده است! (بخش RUBIKA SETTINGS در رابط گرافیکی)")
+        if not channel:
+            raise ValueError("آیدی کانال روبیکا تنظیم نشده است! (بخش RUBIKA SETTINGS در رابط گرافیکی)")
+        self.channel_id = channel
+        self.bot = RubikaBot(token=token)
+        self.rubika_connected = False
         self.news_pool = BalancedNewsPool()
         self.sent_links = set()
         self.sent_titles = []
@@ -646,6 +822,9 @@ class SmartNewsBot:
         # ✅ متغیرهای الگوریتم 2: Source Rotation
         self.rotation_step = 0  # شمارنده مرحله فعلی
         self.rotation_cycle_length = len(SOURCE_ROTATION_CYCLE)
+
+        # ✅ بارگذاری وضعیت قبلی (برای جلوگیری از ارسال تکراری بعد از ری‌استارت)
+        self._load_state()
 
     def log(self, msg):
         print(msg)
@@ -744,6 +923,63 @@ class SmartNewsBot:
         self.sent_hashes.add(self._title_hash(title))
         if len(self.sent_titles) > 500:
             self.sent_titles = self.sent_titles[-500:]
+
+    # ==================== ذخیره/بارگذاری وضعیت (اجرای ابری) ====================
+    def _load_state(self):
+        """بارگذاری وضعیت قبلی تا بعد از ری‌استارت، خبر تکراری ارسال نشود"""
+        try:
+            with open(STATE_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except FileNotFoundError:
+            return
+        except Exception as e:
+            self.log(f'⚠️ State load failed: {e}')
+            return
+        self.sent_links = set(data.get('sent_links', []))
+        self.sent_titles = list(data.get('sent_titles', []))[-500:]
+        self.sent_hashes = set(data.get('sent_hashes', []))
+        self.daily_posts = int(data.get('daily_posts', 0))
+        self.daily_international_posts = int(data.get('daily_international_posts', 0))
+        try:
+            self.last_reset_date = datetime.fromisoformat(
+                data.get('last_reset_date', '')).date()
+        except Exception:
+            pass
+        for key in ('total_fetched', 'total_duplicates', 'total_videos_posted',
+                    'total_international_fetched', 'total_filtered_provinces',
+                    'total_breaking_posted'):
+            setattr(self, key, int(data.get(key, 0)))
+        self.source_stats = dict(data.get('source_stats', {}))
+        self.log(f'📂 State loaded: {len(self.sent_links)} sent links (جلوگیری از ارسال تکراری)')
+
+    def _save_state(self):
+        """ذخیره وضعیت به صورت اتمیک (فایل موقت ← جایگزینی)"""
+        try:
+            state_dir = os.path.dirname(STATE_FILE)
+            if state_dir:
+                os.makedirs(state_dir, exist_ok=True)
+            data = {
+                'sent_links': list(self.sent_links)[-STATE_MAX_LINKS:],
+                'sent_titles': self.sent_titles[-500:],
+                'sent_hashes': list(self.sent_hashes)[-STATE_MAX_LINKS:],
+                'daily_posts': self.daily_posts,
+                'daily_international_posts': self.daily_international_posts,
+                'last_reset_date': self.last_reset_date.isoformat(),
+                'total_fetched': self.total_fetched,
+                'total_duplicates': self.total_duplicates,
+                'total_videos_posted': self.total_videos_posted,
+                'total_international_fetched': self.total_international_fetched,
+                'total_filtered_provinces': self.total_filtered_provinces,
+                'total_breaking_posted': self.total_breaking_posted,
+                'source_stats': self.source_stats,
+                'updated_at': datetime.now().isoformat(),
+            }
+            tmp_file = STATE_FILE + '.tmp'
+            with open(tmp_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False)
+            os.replace(tmp_file, STATE_FILE)
+        except Exception as e:
+            self.log(f'⚠️ State save failed: {e}')
 
     def _detect_category(self, title, summary=''):
         text = (title + ' ' + summary).lower()
@@ -1095,52 +1331,53 @@ class SmartNewsBot:
             self.hourly_posts = 0
             self.hourly_reset_time = now
 
+    # ==================== قالب پیام (متن ساده برای روبیکا) ====================
     async def _format(self, news):
-        source = html.escape(news.get('source', ''))
-        title = html.escape(news.get('title', ''))
-        summary = html.escape(news.get('summary', ''))
+        source = news.get('source', '')
+        title = news.get('title', '')
+        summary = news.get('summary', '')
         link = news.get('link', '')
         emoji = news.get('emoji', '📰')
-        header = '🔴 <b>🚨🚨🚨 خبر فوری</b>\n\n' if news.get('is_breaking') else ''
+        header = '🔴 🚨🚨 خبر فوری\n\n' if news.get('is_breaking') else ''
         return (
-            f'{header}{emoji} <b>{title}</b>\n\n'
+            f'{header}{emoji} {title}\n\n'
             f'{summary}\n\n'
-            f'<i>📌 منبع: {source}</i>\n'
-            f'<a href="{link}">🔗 مشاهده خبر</a>\n\n'
-            f'{CHANNEL_USERNAME}'
+            f'📌 منبع: {source}\n'
+            f'🔗 لینک خبر: {link}\n\n'
+            f'📢 {self.channel_id}'
         ).strip()
 
     async def _format_international_short(self, news):
-        source = html.escape(news.get('source', ''))
-        title = html.escape(news.get('title', ''))
-        summary = html.escape(news.get('summary', ''))
+        source = news.get('source', '')
+        title = news.get('title', '')
+        summary = news.get('summary', '')
         link = news.get('link', '')
         emoji = news.get('emoji', '🌍')
         short_summary = summary.split('.')[0] if summary else ''
         if len(short_summary) > 100:
             short_summary = short_summary[:97] + '...'
-        header = '🔴 <b>🌐 خبر فوری بین‌الملل</b>\n\n' if news.get('is_breaking') else ''
+        header = '🔴 🌐 خبر فوری بین‌الملل\n\n' if news.get('is_breaking') else ''
         return (
-            f'{header}{emoji} <b>{title}</b>\n\n'
+            f'{header}{emoji} {title}\n\n'
             f'📰 {short_summary}\n\n'
-            f'<i>🔗 منبع: {source}</i>\n'
-            f'<a href="{link}">🔍 مشاهده جزئیات</a>\n\n'
-            f'{CHANNEL_USERNAME}'
+            f'🔗 منبع: {source}\n'
+            f'🔍 جزئیات: {link}\n\n'
+            f'📢 {self.channel_id}'
         ).strip()
 
     def _format_viral(self, news):
-        source = html.escape(news.get('source', ''))
-        title = html.escape(news.get('title', ''))
-        summary = html.escape(news.get('summary', ''))
+        source = news.get('source', '')
+        title = news.get('title', '')
+        summary = news.get('summary', '')
         link = news.get('link', '')
         emoji = news.get('emoji', '🔥')
-        header = '🔴 <b>🔥🔥🔥 خبر وایرال - بازتاب گسترده</b>\n\n'
+        header = '🔴 🔥🔥 خبر وایرال - بازتاب گسترده\n\n'
         return (
-            f'{header}{emoji} <b>{title}</b>\n\n'
+            f'{header}{emoji} {title}\n\n'
             f'{summary}\n\n'
-            f'<i>📌 منبع: {source}</i>\n'
-            f'<a href="{link}">🔗 مشاهده خبر</a>\n\n'
-            f'{CHANNEL_USERNAME}'
+            f'📌 منبع: {source}\n'
+            f'🔗 لینک خبر: {link}\n\n'
+            f'📢 {self.channel_id}'
         ).strip()
 
     def _reset_counters(self):
@@ -1157,12 +1394,13 @@ class SmartNewsBot:
             if news['link'] in self.sent_links:
                 return False
             msg = await self._format(news)
-            await self.bot.send_message(chat_id=CHANNEL_USERNAME, text=msg, parse_mode=ParseMode.HTML)
+            await self.bot.send_message(chat_id=self.channel_id, text=msg)
             self.sent_links.add(news['link'])
             self._mark_sent(news['title'])
             self.daily_posts += 1
             self.hourly_posts += 1
             self.total_breaking_posted += 1
+            self._save_state()
             self.log(f'🚨 BREAKING SENT: {news["title"][:60]}...')
             return True
         except Exception as e:
@@ -1214,23 +1452,23 @@ class SmartNewsBot:
             if INCLUDE_IMAGES and news.get('image_url'):
                 try:
                     await self.bot.send_photo(
-                        chat_id=CHANNEL_USERNAME,
+                        chat_id=self.channel_id,
                         photo=news['image_url'],
-                        caption=msg[:1024],
-                        parse_mode=ParseMode.HTML
+                        caption=msg[:RUBIKA_MAX_CAPTION_LENGTH]
                     )
                 except:
                     await self.bot.send_message(
-                        chat_id=CHANNEL_USERNAME, text=msg, parse_mode=ParseMode.HTML
+                        chat_id=self.channel_id, text=msg
                     )
             else:
                 await self.bot.send_message(
-                    chat_id=CHANNEL_USERNAME, text=msg, parse_mode=ParseMode.HTML
+                    chat_id=self.channel_id, text=msg
                 )
             self.sent_links.add(news.get('link', ''))
             self._mark_sent(news.get('title', news.get('title_en', '')))
             self.daily_posts += 1
             self.hourly_posts += 1
+            self._save_state()
             self.log(f'🔥 VIRAL SENT: {news.get("title", news.get("title_en", ""))[:50]}...')
             return True
         except Exception as e:
@@ -1248,36 +1486,35 @@ class SmartNewsBot:
             if INCLUDE_IMAGES and news.get('image_url'):
                 try:
                     await self.bot.send_photo(
-                        chat_id=CHANNEL_USERNAME,
+                        chat_id=self.channel_id,
                         photo=news['image_url'],
-                        caption=msg[:1024],
-                        parse_mode=ParseMode.HTML
+                        caption=msg[:RUBIKA_MAX_CAPTION_LENGTH]
                     )
                 except:
                     await self.bot.send_message(
-                        chat_id=CHANNEL_USERNAME, text=msg, parse_mode=ParseMode.HTML
+                        chat_id=self.channel_id, text=msg
                     )
             elif INCLUDE_VIDEOS and news.get('video_url'):
                 try:
                     await self.bot.send_video(
-                        chat_id=CHANNEL_USERNAME,
+                        chat_id=self.channel_id,
                         video=news['video_url'],
-                        caption=msg[:1024],
-                        parse_mode=ParseMode.HTML
+                        caption=msg[:RUBIKA_MAX_CAPTION_LENGTH]
                     )
                     self.total_videos_posted += 1
                 except:
                     await self.bot.send_message(
-                        chat_id=CHANNEL_USERNAME, text=msg, parse_mode=ParseMode.HTML
+                        chat_id=self.channel_id, text=msg
                     )
             else:
                 await self.bot.send_message(
-                    chat_id=CHANNEL_USERNAME, text=msg, parse_mode=ParseMode.HTML
+                    chat_id=self.channel_id, text=msg
                 )
             self.sent_links.add(news['link'])
             self._mark_sent(news['title'])
             self.daily_posts += 1
             self.hourly_posts += 1
+            self._save_state()
             self.log(f'✅ [{news["category"]}] {news["title"][:50]}...')
             return True
         except Exception as e:
@@ -1325,24 +1562,24 @@ class SmartNewsBot:
             if INCLUDE_IMAGES and final_news.get('image_url'):
                 try:
                     await self.bot.send_photo(
-                        chat_id=CHANNEL_USERNAME,
+                        chat_id=self.channel_id,
                         photo=final_news['image_url'],
-                        caption=msg[:1024],
-                        parse_mode=ParseMode.HTML
+                        caption=msg[:RUBIKA_MAX_CAPTION_LENGTH]
                     )
                 except:
                     await self.bot.send_message(
-                        chat_id=CHANNEL_USERNAME, text=msg, parse_mode=ParseMode.HTML
+                        chat_id=self.channel_id, text=msg
                     )
             else:
                 await self.bot.send_message(
-                    chat_id=CHANNEL_USERNAME, text=msg, parse_mode=ParseMode.HTML
+                    chat_id=self.channel_id, text=msg
                 )
             self.sent_links.add(final_news['link'])
             self._mark_sent(final_news['title'])
             self.daily_international_posts += 1
             self.daily_posts += 1
             self.hourly_posts += 1
+            self._save_state()
             self.log(f'✅ [🌍 {cat}] {t_title[:50]}...')
             return True
         except Exception as e:
@@ -1520,12 +1757,22 @@ class SmartNewsBot:
     # ==================== ✅ اجرای اصلی ====================
     async def run(self):
         self.log('=' * 70)
-        self.log('🤖 Smart News Bot - Dual Algorithm System')
+        self.log('🤖 Rubika News Bot - Dual Algorithm System')
         self.log('=' * 70)
         try:
             info = await self.bot.get_me()
-            self.log(f'✅ Bot: @{info.username}')
-            self.log(f'📢 Channel: {CHANNEL_USERNAME}')
+            self.rubika_connected = True
+            bot_username = info.get('username') or info.get('bot_title') or 'unknown'
+            self.log(f'✅ Rubika Bot: @{bot_username}')
+            self.log(f'📢 Rubika Channel: {self.channel_id}')
+            try:
+                chat = await self.bot.get_chat(self.channel_id)
+                if chat:
+                    chat_title = chat.get('title') or self.channel_id
+                    self.log(f'✅ Channel: {chat_title} ({chat.get("chat_type", "Channel")})')
+            except Exception as e:
+                self.log(f'⚠️ بررسی کانال ناموفق: {e}')
+                self.log('⚠️ مطمئن شوید ربات در کانال روبیکا عضو و ادمین باشد')
             self.log(f'⏱️ Interval: {self.fetch_interval//60}m')
             self.log(f'⏸️ Post delay: {MIN_POST_DELAY}-{MAX_POST_DELAY}s')
             self.log(f'🌍 Translation: Google Translate + News Style')
@@ -1533,10 +1780,14 @@ class SmartNewsBot:
             self.log(f'🧠 Algorithm 1: Smart Priority (20-Stage)')
             self.log(f'🔁 Algorithm 2: Source Rotation ({self.rotation_cycle_length} steps)')
             self.log(f'🎯 Active Algorithm: {self.get_algorithm_name()}')
+            self.log(f'📤 مقصد انتشار: فقط کانال روبیکا')
             self.log('=' * 70 + '\n')
         except Exception as e:
-            self.log(f'❌ Connection failed: {e}')
-            return
+            self.rubika_connected = False
+            self.log(f'❌ Rubika connection failed: {e}')
+            self.log('❌ توکن ربات و دسترسی اینترنت را بررسی کنید')
+            await self.bot.close()
+            return False
         
         self.is_running = True
         self.cycle_count += 1
@@ -1557,8 +1808,13 @@ class SmartNewsBot:
             self.log(f'❌ Fatal: {e}')
             import traceback
             traceback.print_exc()
+        finally:
+            self.rubika_connected = False
+            self._save_state()
+            await self.bot.close()
         
         self.log('🛑 Bot stopped')
+        return True
 
     def stop(self):
         self.is_running = False
@@ -1566,7 +1822,12 @@ class SmartNewsBot:
 
 
 if __name__ == '__main__':
-    bot = SmartNewsBot()
+    try:
+        bot = SmartNewsBot()
+    except ValueError as e:
+        print(f'❌ {e}')
+        print('راهنما: توکن و آیدی کانال را در rubika_config.json یا متغیرهای محیطی تنظیم کنید')
+        raise SystemExit(1)
     try:
         asyncio.run(bot.run())
     except KeyboardInterrupt:
