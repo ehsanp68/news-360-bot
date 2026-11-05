@@ -2,6 +2,7 @@
 import asyncio
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
+from urllib.parse import urljoin, urlparse
 import re
 from difflib import SequenceMatcher
 import hashlib
@@ -64,8 +65,9 @@ STATE_MAX_LINKS = 5000
 TELEGRAM_CHANNEL = 'akhbarefori'
 TELEGRAM_URL = f'https://t.me/s/{TELEGRAM_CHANNEL}'
 NEWS_SOURCES = {'@akhbarefori': TELEGRAM_URL}  # for the GUI status indicator
-FETCH_INTERVAL = 5 * 60
-POST_INTERVAL = 5 * 60
+FETCH_INTERVAL = 10  # seconds between Telegram checks
+POST_DELAY = 2 * 60  # seconds after the Telegram post
+RETRY_DELAY = 30
 TELEGRAM_MAX_PAGES = 100
 
 # ==================== تنظیمات محتوا ====================
@@ -256,12 +258,16 @@ class RubikaBot:
         async with session.get(url, headers={'User-Agent': 'Mozilla/5.0'}) as resp:
             if resp.status != 200:
                 raise RubikaAPIError(f'دانلود رسانه ناموفق: HTTP {resp.status}')
-            data = await resp.read()
+            if resp.content_length and resp.content_length > RUBIKA_MAX_MEDIA_BYTES:
+                raise RubikaAPIError('حجم رسانه بیش از حد مجاز است')
+            data = bytearray()
+            async for chunk in resp.content.iter_chunked(64 * 1024):
+                data.extend(chunk)
+                if len(data) > RUBIKA_MAX_MEDIA_BYTES:
+                    raise RubikaAPIError('حجم رسانه بیش از حد مجاز است')
             if not data:
                 raise RubikaAPIError('دانلود رسانه ناموفق: فایل خالی')
-            if len(data) > RUBIKA_MAX_MEDIA_BYTES:
-                raise RubikaAPIError('حجم رسانه بیش از حد مجاز است')
-            return data
+            return bytes(data)
 
     @staticmethod
     def _guess_filename(url, default_name):
@@ -519,6 +525,7 @@ class SmartNewsBot:
 
         self.pending_news = []
         self.telegram_cursor = None
+        self._retry_after = {}
 
         # ✅ بارگذاری وضعیت قبلی (برای جلوگیری از ارسال تکراری بعد از ری‌استارت)
         self._load_state()
@@ -649,7 +656,11 @@ class SmartNewsBot:
         except (KeyError, TypeError, ValueError):
             pass
         self.pending_news = [item for item in data.get('pending_news', [])
-                             if isinstance(item, dict) and item.get('link') and item.get('title')]
+                             if isinstance(item, dict) and item.get('link') and (item.get('title') or item.get('media'))]
+        # Drop the old bulk backlog when switching to the real-time relay, but
+        # finish any post whose media/text was already partially sent.
+        if data.get('relay_mode') != 'realtime_v1':
+            self.pending_news = [item for item in self.pending_news if item.get('delivery_started')]
         cursor = data.get('telegram_cursor')
         self.telegram_cursor = cursor if isinstance(cursor, int) and cursor > 0 else None
         self.source_stats = dict(data.get('source_stats', {}))
@@ -668,6 +679,7 @@ class SmartNewsBot:
                 'daily_posts': self.daily_posts,
                 'last_post_time': self.last_post_time.isoformat() if self.last_post_time else None,
                 'pending_news': self.pending_news,
+                'relay_mode': 'realtime_v1',
                 'telegram_cursor': self.telegram_cursor,
                 'last_reset_date': self.last_reset_date.isoformat(),
                 'total_fetched': self.total_fetched,
@@ -832,22 +844,53 @@ class SmartNewsBot:
                 for br in text_node.find_all('br'):
                     br.replace_with('\n')
                 text = text_node.get_text().strip()
-            posts.append((int(match.group(1)), text))
+            media = []
+            for node in message.select('.tgme_widget_message_photo_wrap, .tgme_widget_message_video_player, video.tgme_widget_message_video'):
+                # A video inside its player has already been processed.
+                if node.name == 'video' and node.find_parent(class_='tgme_widget_message_video_player'):
+                    continue
+                classes = node.get('class', [])
+                if 'tgme_widget_message_photo_wrap' in classes:
+                    match_url = re.search(r"url\(\s*['\"]?([^'\")]+)", node.get('style', ''), re.I)
+                    url = match_url.group(1).strip() if match_url else None
+                    kind = 'photo'
+                else:
+                    video = node if node.name == 'video' else node.find('video')
+                    source = video.find('source') if video else None
+                    url = (video.get('src') if video else None) or (source.get('src') if source else None)
+                    kind = 'video'
+                if url:
+                    url = urljoin(TELEGRAM_URL, url)
+                    if urlparse(url).scheme not in ('http', 'https'):
+                        url = None
+                # Preserve unavailable media rather than silently posting the wrong image.
+                media.append({'type': kind, 'url': url})
+            timestamp = None
+            time_node = message.select_one('time[datetime]')
+            if time_node:
+                try:
+                    parsed = datetime.fromisoformat(time_node['datetime'].replace('Z', '+00:00'))
+                    if parsed.tzinfo is not None:
+                        timestamp = parsed.timestamp()
+                except ValueError:
+                    pass
+            posts.append((int(match.group(1)), text, media, timestamp))
         return sorted(posts)
 
-    def _telegram_item(self, post_id, text):
+    def _telegram_item(self, post_id, text, media=None):
         # Remove channel handles, source/credit lines and URLs, never add a footer.
         lines = []
         for line in text.splitlines():
-            line = re.sub(r'@[A-Za-z0-9_]+', '', line)
+            line = self._strip_breaking_phrase(re.sub(r'@[A-Za-z0-9_]+', '', line))
             if re.match(r'^\s*(?:📌\s*)?(?:منبع|لینک خبر)\s*[:：]', line):
                 continue
             line = self._style_strip_links(line).strip()
             if line and re.search(r'[\w]', line):
                 lines.append(line)
-        if not lines:
-            return None  # media-only or empty posts cannot be relayed as text
-        return {'title': lines[0], 'summary': '\n'.join(lines[1:]),
+        if not lines and not media:
+            return None
+        return {'title': lines[0] if lines else '', 'summary': '\n'.join(lines[1:]),
+                'media': media or [],
                 'link': f'https://t.me/{TELEGRAM_CHANNEL}/{post_id}',
                 'source': '@akhbarefori', 'category': 'عمومی'}
 
@@ -870,9 +913,9 @@ class SmartNewsBot:
                         if before is None:
                             raise ValueError('Telegram preview contains no posts')
                         break
-                    for post_id, text in posts:
+                    for post_id, text, media, published_at in posts:
                         if cursor is None or post_id > cursor:
-                            all_posts[post_id] = text
+                            all_posts[post_id] = (text, media, published_at)
                     oldest = posts[0][0]
                     if cursor is None or oldest <= cursor:
                         break
@@ -883,8 +926,16 @@ class SmartNewsBot:
                     raise ValueError('Telegram history exceeds pagination limit; no cursor advanced')
             queued = {item['link'] for item in self.pending_news}
             count = 0
-            for post_id, text in sorted(all_posts.items()):
-                item = self._telegram_item(post_id, text)
+            for post_id, (text, media, published_at) in sorted(all_posts.items()):
+                # On first startup, do not replay historical posts. Recent posts
+                # still within their two-minute delay remain eligible.
+                if cursor is None and (published_at is None or published_at < time.time() - POST_DELAY):
+                    continue
+                item = self._telegram_item(post_id, text, media)
+                if item:
+                    # If Telegram omits a date, wait two minutes from discovery;
+                    # never guess that an undated post is already old enough.
+                    item['published_at'] = published_at if published_at is not None else time.time()
                 if item and item['link'] not in self.sent_links and item['link'] not in queued:
                     self.pending_news.append(item)
                     queued.add(item['link'])
@@ -906,16 +957,51 @@ class SmartNewsBot:
             self.hourly_reset_time = now
 
     # ==================== قالب پیام (متن ساده برای روبیکا) ====================
-    def _format_text(self, news):
-        # حذف ارجاع رایج به خبرگزاری در ابتدای متن RSS، علاوه بر حذف لینک‌ها.
-        title = self._news_style(news.get('title', ''), is_title=True)
+    @staticmethod
+    def _strip_breaking_phrase(text):
+        # Normalize Arabic/Persian variants and ignore spaces, ZWNJ and diacritics.
+        text = (text or '').replace('ي', 'ی').replace('ك', 'ک')
+        text = re.sub(r'خبر[\s\u200c\u200d\u064b-\u065f]*فور[یي]', '', text)
+        return re.sub(r'[ \t]{2,}', ' ', text).strip()
+
+    def _format_full_text(self, news):
+        """Legacy formatting, retained to finish deliveries started before an upgrade."""
+        title = self._news_style(self._strip_breaking_phrase(news.get('title', '')), is_title=True)
         summary = news.get('summary', '') or ''
         source = news.get('source', '') or ''
         if source:
             summary = re.sub(r'^\s*به گزارش\s+(?:خبرگزاری\s+)?' +
                              re.escape(source) + r'\s*[,،:]\s*', '', summary)
-        summary = self._news_style(summary)
+        summary = self._news_style(self._strip_breaking_phrase(summary))
         return '\n\n'.join(part for part in (title, summary) if part)
+
+    def _brief_sentences(self, text):
+        """Extract complete sentences/lines; never invent facts or cut decimals."""
+        text = self._strip_breaking_phrase(text or '')
+        text = self._style_strip_links(text)
+        text = re.sub(r'@[A-Za-z0-9_]+', '', text)
+        parts = re.split(r'(?<=[؟!?])\s+|(?<!\d)\.(?=\s|$)\s*|(?<=\d)\.(?=\s|$)\s*|\n+', text)
+        return [part.strip(' \t\r🔹🔸▪️•-:：') for part in parts
+                if re.search(r'[\w]', part)]
+
+    def _format_text(self, news):
+        # Extraction, not generative rewriting: retain the headline and at most
+        # one non-redundant sentence from the original post.
+        title_parts = self._brief_sentences(news.get('title', ''))
+        title = self._news_style(title_parts[0], is_title=True) if title_parts else ''
+        summary = news.get('summary', '') or ''
+        source = news.get('source', '') or ''
+        if source:
+            summary = re.sub(r'^\s*به گزارش\s+(?:خبرگزاری\s+)?' +
+                             re.escape(source) + r'\s*[,،:]\s*', '', summary)
+        candidates = title_parts[1:] + self._brief_sentences(summary)
+        title_key = re.sub(r'[^\w]', '', title).casefold()
+        for sentence in candidates:
+            styled = self._news_style(sentence)
+            key = re.sub(r'[^\w]', '', styled).casefold()
+            if key and key != title_key:
+                return '\n\n'.join(part for part in (title, styled) if part)
+        return title
 
     async def _format(self, news):
         return self._format_text(news)
@@ -923,10 +1009,21 @@ class SmartNewsBot:
     def _format_viral(self, news):
         return self._format_text(news)
 
-    def _post_wait_seconds(self):
-        if self.last_post_time is None:
+    def _post_wait_seconds(self, news=None):
+        """Seconds until this post has reached its own Telegram +2 min deadline."""
+        if news is None:
+            if not self.pending_news:
+                return 0
+            return min(self._post_wait_seconds(item) for item in self.pending_news)
+        if news.get('delivery_started'):
             return 0
-        return max(0, POST_INTERVAL - (datetime.now() - self.last_post_time).total_seconds())
+        published = news.get('published_at')
+        if not isinstance(published, (int, float)):
+            # Older partially transferred posts can resume; other legacy items
+            # are conservatively treated as discovered now.
+            published = time.time()
+            news['published_at'] = published
+        return max(0, published + POST_DELAY - time.time())
 
     def _reset_counters(self):
         today = datetime.now().date()
@@ -977,47 +1074,131 @@ class SmartNewsBot:
             self.log(f'❌ خطای ارسال وایرال: {e}')
             return False
 
+    async def _refresh_telegram_media(self, news):
+        """Refresh expiring preview URLs without replacing a different post's media."""
+        match = re.fullmatch(r'https://t\.me/akhbarefori/(\d+)', news['link'])
+        if not match:
+            return False
+        post_id = int(match.group(1))
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
+                async with session.get(TELEGRAM_URL, params={'before': post_id + 1},
+                                       headers={'User-Agent': 'Mozilla/5.0'}) as response:
+                    response.raise_for_status()
+                    posts = self._parse_telegram_page(await response.text())
+            updated = next((media for ident, _, media, _ in posts if ident == post_id), None)
+            previous = news.get('media')
+            if updated is None or (previous is not None and
+                                   [m['type'] for m in updated] != [m['type'] for m in previous]):
+                return False
+            news['media'] = updated
+            news['media_needs_refresh'] = False
+            self._save_state()
+            return True
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as e:
+            self.log(f'❌ Telegram media refresh: {e}')
+            return False
+
+    def _record_delivery_progress(self, news):
+        news['delivery_started'] = True
+        self.last_post_time = datetime.now()
+        self._save_state()
+
     async def _send_domestic_direct(self, news):
         self._reset_counters()
-        if self.daily_posts >= DAILY_NEWS_LIMIT:
-            return False
         try:
             if news['link'] in self.sent_links:
                 return False
-            msg = await self._format(news)
-            await self.bot.send_message(chat_id=self.channel_id, text=msg)
+            # Freeze the text for retries: offsets and previously sent captions
+            # must not change if the summarizer is upgraded during delivery.
+            msg = news.get('rendered_text')
+            if msg is None:
+                msg = (self._format_full_text(news) if news.get('delivery_started')
+                       else await self._format(news))
+                news['rendered_text'] = msg
+                self._save_state()
+            # Queues saved by older versions did not record media. Look up the
+            # original Telegram post before publishing so attachments are not lost.
+            if ('media' not in news and re.fullmatch(r'https://t\.me/akhbarefori/\d+', news['link'])
+                    and not await self._refresh_telegram_media(news)):
+                raise RubikaAPIError('بازیابی رسانه پست قدیمی تلگرام ناموفق بود')
+            media = news.get('media', [])
+            # Also handle legacy callers and queued items carrying media URLs.
+            if not media:
+                media = ([{'type': 'photo', 'url': news['image_url']}] if news.get('image_url') else
+                         [{'type': 'video', 'url': news['video_url']}] if news.get('video_url') else [])
+                if media:
+                    news['media'] = media
+            if media and (news.get('media_needs_refresh') or any(not m.get('url') for m in media)):
+                if not await self._refresh_telegram_media(news):
+                    raise RubikaAPIError('رسانه اصلی تلگرام در صفحه عمومی در دسترس نیست')
+                media = news['media']
+            caption = msg[:RUBIKA_MAX_CAPTION_LENGTH] if media else ''
+            while news.get('media_index', 0) < len(media):
+                index = news.get('media_index', 0)
+                entry = media[index]
+                if not entry.get('url'):
+                    raise RubikaAPIError('آدرس رسانه تلگرام موجود نیست')
+                try:
+                    if entry['type'] == 'photo':
+                        await self.bot.send_photo(self.channel_id, entry['url'], caption=caption if index == 0 else '')
+                    elif entry['type'] == 'video':
+                        await self.bot.send_video(self.channel_id, entry['url'], caption=caption if index == 0 else '')
+                        self.total_videos_posted += 1
+                    else:
+                        raise RubikaAPIError('نوع رسانه پشتیبانی نمی‌شود')
+                except Exception:
+                    news['media_needs_refresh'] = True
+                    self._save_state()
+                    raise
+                news['media_index'] = index + 1
+                self._record_delivery_progress(news)
+
+            # Preserve text longer than the caption limit in adjacent messages.
+            remainder = msg[len(caption):] if media else msg
+            offset = news.get('text_offset', 0)
+            while offset < len(remainder):
+                chunk = remainder[offset:offset + RUBIKA_MAX_TEXT_LENGTH]
+                await self.bot.send_message(chat_id=self.channel_id, text=chunk)
+                offset += len(chunk)
+                news['text_offset'] = offset
+                self._record_delivery_progress(news)
             self.sent_links.add(news['link'])
-            self._mark_sent(news['title'])
+            self._mark_sent(news.get('title', ''))
             self.daily_posts += 1
             self.hourly_posts += 1
-            self.last_post_time = datetime.now()
             self._save_state()
-            self.log(f'✅ [{news["category"]}] {news["title"][:50]}...')
+            self.log(f'✅ [{news.get("category", "عمومی")}] {news.get("title", "")[:50]}...')
             return True
         except Exception as e:
             self.log(f'❌ post: {e}')
             return False
 
-    async def publish_loop(self):
-        """Relay messages in channel order, with a five-minute minimum interval."""
+    async def poll_telegram(self):
+        """Keep checking Telegram even while an upload is slow or retrying."""
         while self.is_running:
             now = datetime.now()
             if self.last_fetch_time is None or (now - self.last_fetch_time).total_seconds() >= self.fetch_interval:
                 self.cycle_count += 1
-                await self.fetch_all_news()
-            if self.pending_news and self._post_wait_seconds() <= 0:
-                news = self.pending_news[0]
-                if news['link'] in self.sent_links:
-                    self.pending_news.pop(0)
+                await self.fetch_all_news(is_initial=self.telegram_cursor is None)
+            await asyncio.sleep(1)
+
+    async def publish_loop(self):
+        """Send each discovered post once its own Telegram timestamp is 2 minutes old."""
+        while self.is_running:
+            now = time.time()
+            news = next((item for item in self.pending_news
+                         if self._post_wait_seconds(item) <= 0
+                         and self._retry_after.get(item['link'], 0) <= now), None)
+            if news is not None:
+                link = news['link']
+                if link in self.sent_links or await self._send_domestic_direct(news):
+                    self.pending_news.remove(news)
+                    self._retry_after.pop(link, None)
                     self._save_state()
                     continue
-                if await self._send_domestic_direct(news):
-                    self.pending_news.pop(0)
-                    self._save_state()
-                else:
-                    # Keep the post for retry instead of losing it on an API failure.
-                    await asyncio.sleep(30)
-                    continue
+                # One unavailable video must not block other due news.
+                self._retry_after[link] = time.time() + RETRY_DELAY
             await asyncio.sleep(1)
 
     def _secs_to_fetch(self):
@@ -1044,11 +1225,11 @@ class SmartNewsBot:
             except Exception as e:
                 self.log(f'⚠️ بررسی کانال ناموفق: {e}')
                 self.log('⚠️ مطمئن شوید ربات در کانال روبیکا عضو و ادمین باشد')
-            self.log(f'⏱️ Interval: {self.fetch_interval//60}m')
-            self.log(f'⏸️ Post delay: {POST_INTERVAL}s')
+            self.log(f'⏱️ Telegram check interval: {self.fetch_interval}s')
+            self.log(f'⏸️ Delay after Telegram post: {POST_DELAY}s')
             self.log(f'✍️ News Style: Active (سبک خبری روی همه خبرها)')
             self.log(f'📤 مقصد انتشار: فقط کانال روبیکا')
-            self.log('📥 Source: Telegram @akhbarefori | text only, no links')
+            self.log('📥 Source: Telegram @akhbarefori | media and text, no links')
             self.log('=' * 70 + '\n')
         except Exception as e:
             self.rubika_connected = False
@@ -1058,10 +1239,7 @@ class SmartNewsBot:
             return False
         
         self.is_running = True
-        self.cycle_count += 1
-        await self.fetch_all_news(is_initial=True)
-        self.next_fetch_time = datetime.now() + timedelta(seconds=self.fetch_interval)
-        
+        poll_task = asyncio.create_task(self.poll_telegram())
         try:
             await self.publish_loop()
         except Exception as e:
@@ -1069,6 +1247,11 @@ class SmartNewsBot:
             import traceback
             traceback.print_exc()
         finally:
+            poll_task.cancel()
+            try:
+                await poll_task
+            except asyncio.CancelledError:
+                pass
             self.rubika_connected = False
             self._save_state()
             await self.bot.close()

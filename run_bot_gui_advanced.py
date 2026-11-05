@@ -8,7 +8,7 @@ News360 Rubika Bot - Glassmorphism UI - RESPONSIVE VERSION
 ✅ سبک خبری + تشخیص دقیق فوری/وایرال
 ✅ F11 Fullscreen Toggle
 ✅ انتشار فقط و فقط در کانال روبیکا (Rubika-only)
-✅ فقط متن خبر بدون لینک و منبع
+✅ خبر و رسانه بدون لینک و منبع
 """
 import tkinter as tk
 from tkinter import scrolledtext, messagebox, Canvas
@@ -234,7 +234,7 @@ class GlassmorphicUI:
         self.bot = None
         self.bot_thread = None
         self.is_running = False
-        self.fetch_interval = 5 * 60
+        self.fetch_interval = 10
         self.next_fetch_time = None
         self.connection_status = "OFFLINE"
         self.connection_color = self.colors['neon_pink']
@@ -311,7 +311,7 @@ class GlassmorphicUI:
     def update_algorithm_step_display(self):
         if self.is_running and self.bot and self.step_display_label:
             self.step_display_label.config(
-                text=f"📊 Queue: {len(self.bot.pending_news)} | Next post: {int(self.bot._post_wait_seconds())}s")
+                text=f"⏱ در انتظار انتشار: {len(self.bot.pending_news)} | تا انتشار: {int(self.bot._post_wait_seconds())}s")
         self.root.after(1000, self.update_algorithm_step_display)
 
     def force_fetch(self):
@@ -359,7 +359,6 @@ class GlassmorphicUI:
         middle_sf.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
         middle_sf.canvas.configure(width=380)
         
-        self.create_fetch_interval_section(middle_sf.interior)
         self.create_controls_section(middle_sf.interior)
 
         # ✅ ✅ ✅ RIGHT PANEL - ScrolledFrame
@@ -396,7 +395,7 @@ class GlassmorphicUI:
 
         tk.Label(
             header_glass,
-            text="Telegram @akhbarefori → Rubika • Text only",
+            text="Telegram @akhbarefori → Rubika • News and media",
             font=self.font_manager.get_font("tiny"),
             bg=self.colors['glass_dark'], fg=self.colors['neon_purple']
         ).pack(pady=(0, 3))
@@ -479,7 +478,7 @@ class GlassmorphicUI:
 
         stats = [
             ('━━━ POOL STATS ━━━', None, None, self.colors['neon_cyan']),
-            ('📊', 'TOTAL POOL SIZE', 'pool', self.colors['neon_blue']),
+            ('📊', 'AWAITING PUBLICATION', 'pool', self.colors['neon_blue']),
             ('', '', None, None),
             ('━━━ POST STATS ━━━', None, None, self.colors['neon_green']),
             ('✅', 'POSTED TODAY', 'posted', self.colors['neon_green']),
@@ -634,7 +633,7 @@ class GlassmorphicUI:
 
         tk.Label(
             algo_glass,
-            text="FIFO • حداقل ۵ دقیقه فاصله بین پست‌ها",
+            text="بررسی هر ۱۰ ثانیه • انتشار ۲ دقیقه بعد از تلگرام",
             font=self.font_manager.get_font("tiny"),
             bg=self.colors['glass_lighter'], fg=self.colors['text_secondary']
         ).pack(anchor=tk.W, padx=10, pady=(0, 3))
@@ -1374,7 +1373,7 @@ class GlassmorphicUI:
 
         self.log("═══════════════════════════════════════════════", "system")
         self.log("🚀 SYSTEM BOOTING...", "success")
-        self.log(f"⏱ Fetch cycle set to {self.fetch_interval//60} minutes", "info")
+        self.log(f"⏱ Telegram checked every {self.fetch_interval} seconds", "info")
         self.log("📥 Telegram @akhbarefori: enabled", "success")
         self.log("✍️ News Style: ENABLED (سبک خبری برای همه خبرها)", "success")
         self.log(f"📤 Publishing target: Rubika channel {channel} ONLY", "success")

@@ -170,14 +170,14 @@ async def test_smart_bot(base_url):
     news_photo = dict(news, link="https://example.com/news/2",
                       image_url=f"{base_url}/media/photo2.jpg")
     ok = await news_bot._send_domestic_direct(news_photo)
-    assert ok and received["messages"][-1]["text"] == text
-    print("✅ photo ignored; text-only post OK")
+    assert ok and received["files"][-1]["text"] == text
+    print("✅ photo uploaded with caption OK")
 
     news_video = dict(news, link="https://example.com/news/3",
                       video_url=f"{base_url}/media/clip2.mp4")
     ok = await news_bot._send_domestic_direct(news_video)
-    assert ok and received["messages"][-1]["text"] == text
-    print("✅ video ignored; text-only post OK")
+    assert ok and received["files"][-1]["text"] == text
+    print("✅ video uploaded with caption OK")
 
     breaking = dict(news, link="https://example.com/news/4", is_breaking=True)
     ok = await news_bot._send_breaking(breaking)
@@ -194,8 +194,8 @@ async def test_smart_bot(base_url):
     bad_photo = dict(news, link="https://example.com/news/7",
                      image_url=f"{base_url}/media/missing.jpg")
     ok = await news_bot._send_domestic_direct(bad_photo)
-    assert ok
-    print("✅ photo failure falls back to text OK")
+    assert not ok
+    print("✅ photo failure is retained for retry OK")
 
     await news_bot.bot.close()
 
