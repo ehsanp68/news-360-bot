@@ -201,33 +201,13 @@ async def test_smart_bot(base_url):
 
 
 def test_domestic_only():
-    # هیچ منبع خارجی نباید باقی مانده باشد
-    assert not hasattr(bot_module, "INTERNATIONAL_SOURCES"), "منابع خارجی باید حذف شده باشند"
-    assert not hasattr(bot_module, "TRANSLATION_MAX_RETRIES"), "تنظیمات ترجمه باید حذف شده باشند"
-    assert not hasattr(SmartNewsBot, "_send_international_direct")
-    assert not hasattr(SmartNewsBot, "_smart_translate")
-    # چرخش منبع فقط باید به منابع داخلی اشاره کند
-    for step_type, source, _wait in bot_module.SOURCE_ROTATION_CYCLE:
-        if step_type == "publish":
-            assert source in bot_module.NEWS_SOURCES, f"منبع خارجی در چرخش: {source}"
-    print(f"✅ domestic-only: {len(bot_module.NEWS_SOURCES)} sources, "
-          f"{len(bot_module.SOURCE_ROTATION_CYCLE)} rotation steps (no foreign sources)")
+    assert bot_module.NEWS_SOURCES == {'@akhbarefori': 'https://t.me/s/akhbarefori'}
+    assert not hasattr(bot_module, 'SOURCE_ROTATION_CYCLE')
 
 
 def test_single_algorithm():
-    # Smart Priority باید کاملاً حذف شده باشد؛ فقط Source Rotation بماند
-    assert not hasattr(bot_module, "ALGORITHM_SMART_PRIORITY")
-    assert not hasattr(bot_module, "PUBLISH_CYCLE_SLOTS")
-    assert not hasattr(SmartNewsBot, "publish_loop_smart_priority")
-    assert not hasattr(SmartNewsBot, "set_algorithm")
-    assert not hasattr(SmartNewsBot, "get_algorithm_name")
-    assert not hasattr(SmartNewsBot, "current_algorithm")
-    pool = bot_module.BalancedNewsPool()
-    assert not hasattr(pool, "get_next_by_cycle")
-    assert not hasattr(pool, "get_next_slot")
-    assert not hasattr(pool, "cycle_slots")
-    assert hasattr(SmartNewsBot, "publish_loop_source_rotation")
-    print("✅ single algorithm: Smart Priority removed, Source Rotation is the only publisher")
+    assert hasattr(SmartNewsBot, 'publish_loop')
+    assert not hasattr(SmartNewsBot, 'publish_loop_source_rotation')
 
 
 def test_news_style():

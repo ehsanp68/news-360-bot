@@ -1,8 +1,6 @@
 # News360 Rubika Bot - Dependencies
 # نصب: pip install -r requirements.txt
 # نکته: tkinter همراه پایتون رسمی ویندوز نصب می‌شود (نیاز به نصب جداگانه ندارد)
-feedparser
 beautifulsoup4
-requests
 aiohttp
 psutil

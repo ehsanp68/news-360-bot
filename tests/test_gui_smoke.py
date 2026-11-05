@@ -99,7 +99,7 @@ def main():
     assert not hasattr(app, "test_translation"), "تستر ترجمه باید حذف شده باشد"
     assert set(app.rss_status_labels.keys()) == set(gui.NEWS_SOURCES.keys()), \
         "لیست RSS باید فقط منابع داخلی باشد"
-    print("✅ Platform status contains ONLY Rubika; RSS list is domestic-only")
+    print("✅ Platform status contains ONLY Rubika; source is Telegram")
 
     # Smart Priority باید از GUI حذف شده باشد؛ فقط پنل Source Rotation بماند
     assert not hasattr(app, "select_algorithm"), "انتخابگر الگوریتم باید حذف شده باشد"
@@ -108,7 +108,7 @@ def main():
     assert not hasattr(bot_module, "ALGORITHM_SMART_PRIORITY")
     assert hasattr(app, "create_algorithm_section")
     assert app.algorithm_info_label is not None and app.step_display_label is not None
-    print("✅ GUI shows single Source Rotation panel (no algorithm selector)")
+    print("✅ GUI shows Telegram relay status (no algorithm selector)")
 
     # ویجت‌های تنظیمات روبیکا ساخته شده‌اند
     assert hasattr(app, "rubika_token_var") and hasattr(app, "rubika_channel_var")

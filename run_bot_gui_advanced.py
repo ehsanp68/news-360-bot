@@ -4,11 +4,11 @@ News360 Rubika Bot - Glassmorphism UI - RESPONSIVE VERSION
 ✅ ScrolledFrame برای همه پنل‌ها
 ✅ Auto-scroll در مانیتورهای کوچک
 ✅ Minimum window size
-✅ Source Rotation Publishing (تک‌الگوریتم)
+✅ Telegram @akhbarefori → Rubika
 ✅ سبک خبری + تشخیص دقیق فوری/وایرال
 ✅ F11 Fullscreen Toggle
 ✅ انتشار فقط و فقط در کانال روبیکا (Rubika-only)
-✅ فقط منابع داخلی - بدون لینک خبر در پست‌ها
+✅ فقط متن خبر بدون لینک و منبع
 """
 import tkinter as tk
 from tkinter import scrolledtext, messagebox, Canvas
@@ -172,7 +172,7 @@ class FontManager:
 # ==================== LOAD BOT ====================
 try:
     from bot import (SmartNewsBot, RUBIKA_BOT_TOKEN, RUBIKA_CHANNEL_ID,
-                     NEWS_SOURCES, SOURCE_ROTATION_CYCLE,
+                     NEWS_SOURCES,
                      load_rubika_config, save_rubika_config)
 except ImportError as e:
     print(f"❌ Error loading bot: {e}")
@@ -234,7 +234,7 @@ class GlassmorphicUI:
         self.bot = None
         self.bot_thread = None
         self.is_running = False
-        self.fetch_interval = 30 * 60
+        self.fetch_interval = 5 * 60
         self.next_fetch_time = None
         self.connection_status = "OFFLINE"
         self.connection_color = self.colors['neon_pink']
@@ -272,7 +272,6 @@ class GlassmorphicUI:
         self.update_platform_status()
         self.update_rss_status()
         self.update_uptime()
-        self.update_viral_breaking_stats()
         self.update_algorithm_step_display()
 
     # ==================== ✅ ✅ ✅ Resize Handler ====================
@@ -311,28 +310,8 @@ class GlassmorphicUI:
     # ==================== نمایش الگوریتم انتشار ====================
     def update_algorithm_step_display(self):
         if self.is_running and self.bot and self.step_display_label:
-            try:
-                pool_size = self.bot.news_pool.size()
-                step_info = self.bot.get_current_step_info()
-                if step_info:
-                    step_num = step_info['step_number']
-                    total = step_info['total_steps']
-                    if step_info['step_type'] == 'publish':
-                        text = f"📍 Step {step_num}/{total} → 📰 [{step_info['source']}] | Pool: {pool_size}"
-                        color = self.colors['neon_green']
-                    else:
-                        min_w, max_w = step_info['wait_range']
-                        text = f"⏳ Step {step_num}/{total} → ⏱ Wait {min_w}-{max_w}s | Pool: {pool_size}"
-                        color = self.colors['neon_yellow']
-                    self.step_display_label.config(text=text, fg=color)
-                else:
-                    self.step_display_label.config(
-                        text=f"🔁 Source Rotation | Pool: {pool_size}",
-                        fg=self.colors['neon_orange']
-                    )
-            except Exception:
-                pass
-
+            self.step_display_label.config(
+                text=f"📊 Queue: {len(self.bot.pending_news)} | Next post: {int(self.bot._post_wait_seconds())}s")
         self.root.after(1000, self.update_algorithm_step_display)
 
     def force_fetch(self):
@@ -342,17 +321,6 @@ class GlassmorphicUI:
         self.bot.last_fetch_time = None
         self.log("🔄 Force fetch triggered by user", "warning")
         messagebox.showinfo("Force Fetch", "✅ Fetch will start in next cycle")
-
-    def force_cleanup(self):
-        if not self.is_running or not self.bot:
-            messagebox.showwarning("Warning", "Bot is not running!")
-            return
-        try:
-            self.bot.news_pool.smart_cleanup(force=True)
-            self.log("🧹 Force cleanup triggered by user", "warning")
-            messagebox.showinfo("Force Cleanup", "✅ Pool cleaned successfully")
-        except Exception as e:
-            messagebox.showerror("Error", f"❌ Cleanup failed: {e}")
 
     # ==================== ✅ ✅ ✅ UI BUILD - RESPONSIVE ====================
     def create_glassmorphic_ui(self):
@@ -391,7 +359,6 @@ class GlassmorphicUI:
         middle_sf.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
         middle_sf.canvas.configure(width=380)
         
-        self.create_categories_section(middle_sf.interior)
         self.create_fetch_interval_section(middle_sf.interior)
         self.create_controls_section(middle_sf.interior)
 
@@ -429,7 +396,7 @@ class GlassmorphicUI:
 
         tk.Label(
             header_glass,
-            text="Rubika Channel Only • Domestic Sources • Source Rotation • News Style",
+            text="Telegram @akhbarefori → Rubika • Text only",
             font=self.font_manager.get_font("tiny"),
             bg=self.colors['glass_dark'], fg=self.colors['neon_purple']
         ).pack(pady=(0, 3))
@@ -517,15 +484,10 @@ class GlassmorphicUI:
             ('━━━ POST STATS ━━━', None, None, self.colors['neon_green']),
             ('✅', 'POSTED TODAY', 'posted', self.colors['neon_green']),
             ('⏱', 'PER HOUR', 'hour', self.colors['neon_cyan']),
-            ('🎬', 'VIDEOS SENT', 'videos', self.colors['neon_pink']),
             ('', '', None, None),
-            ('━━━ SMART STATS ━━━', None, None, self.colors['neon_orange']),
-            ('🔥', 'VIRAL NEWS', 'viral', self.colors['neon_orange']),
-            ('🚨', 'BREAKING NEWS', 'breaking', self.colors['neon_red']),
             ('', '', None, None),
             ('━━━ FILTER STATS ━━━', None, None, self.colors['neon_purple']),
             ('⏭', 'DUPLICATES', 'dups', self.colors['neon_purple']),
-            ('🚫', 'FILTERED', 'filtered', self.colors['neon_pink']),
         ]
 
         self.stat_labels = {}
@@ -653,7 +615,7 @@ class GlassmorphicUI:
     # ==================== PUBLISH ALGORITHM ====================
     def create_algorithm_section(self, parent):
         tk.Label(
-            parent, text="▌ PUBLISH ALGORITHM",
+            parent, text="▌ NEWS RELAY",
             font=self.font_manager.get_font("header"),
             bg=self.colors['bg_main'], fg=self.colors['neon_orange']
         ).pack(anchor=tk.W, pady=(5, 3))
@@ -665,14 +627,14 @@ class GlassmorphicUI:
         algo_glass.pack(fill=tk.X, pady=(0, 5), padx=2)
 
         tk.Label(
-            algo_glass, text="🔁 Source Rotation",
+            algo_glass, text="📥 Telegram @akhbarefori",
             font=self.font_manager.get_font("header"),
             bg=self.colors['glass_lighter'], fg=self.colors['neon_orange']
         ).pack(anchor=tk.W, padx=10, pady=(5, 0))
 
         tk.Label(
             algo_glass,
-            text=f"{len(SOURCE_ROTATION_CYCLE)} Steps • Source-based • تنها الگوریتم انتشار",
+            text="FIFO • حداقل ۵ دقیقه فاصله بین پست‌ها",
             font=self.font_manager.get_font("tiny"),
             bg=self.colors['glass_lighter'], fg=self.colors['text_secondary']
         ).pack(anchor=tk.W, padx=10, pady=(0, 3))
@@ -685,7 +647,7 @@ class GlassmorphicUI:
 
         self.algorithm_info_label = tk.Label(
             status_frame,
-            text="✅ ACTIVE: 🔁 Source Rotation",
+            text="✅ Telegram → Rubika",
             font=self.font_manager.get_font("small"),
             bg=self.colors['glass_dark'], fg=self.colors['neon_orange']
         )
@@ -693,7 +655,7 @@ class GlassmorphicUI:
 
         self.step_display_label = tk.Label(
             status_frame,
-            text="📊 Pool: 0 | Step: --",
+            text="📊 Queue: 0",
             font=self.font_manager.get_font("tiny"),
             bg=self.colors['glass_dark'], fg=self.colors['neon_yellow']
         )
@@ -770,7 +732,7 @@ class GlassmorphicUI:
         ).pack(side=tk.LEFT)
 
         self.interval_display = tk.Label(
-            slider_frame, text="30 min",
+            slider_frame, text="5 min",
             font=self.font_manager.get_font("small"),
             bg=self.colors['glass_lighter'], fg=self.colors['neon_blue']
         )
@@ -780,20 +742,20 @@ class GlassmorphicUI:
         slider_container.pack(fill=tk.X, padx=8, pady=3)
 
         self.interval_slider = tk.Scale(
-            slider_container, from_=15, to=60, orient=tk.HORIZONTAL,
+            slider_container, from_=1, to=60, orient=tk.HORIZONTAL,
             command=self.on_interval_change,
             bg=self.colors['glass_light'], fg=self.colors['neon_blue'],
             troughcolor=self.colors['glass_dark'],
             activebackground=self.colors['neon_cyan'],
             highlightthickness=0, relief=tk.FLAT, bd=0
         )
-        self.interval_slider.set(30)
+        self.interval_slider.set(5)
         self.interval_slider.pack(fill=tk.X)
 
         buttons_frame = tk.Frame(interval_glass, bg=self.colors['glass_lighter'])
         buttons_frame.pack(fill=tk.X, padx=6, pady=3)
 
-        for interval in [15, 20, 30, 45, 60]:
+        for interval in [1, 5, 15, 30, 60]:
             btn = tk.Button(
                 buttons_frame, text=f"{interval}m",
                 command=lambda i=interval: self.set_interval(i),
@@ -879,11 +841,6 @@ class GlassmorphicUI:
             activebackground=self.colors['neon_cyan'], **button_style
         ).pack(side=tk.LEFT, padx=2, expand=True, fill=tk.BOTH)
 
-        tk.Button(
-            row2, text="🧹 CLEAN", command=self.force_cleanup,
-            bg=self.colors['neon_purple'], fg="#ffffff",
-            activebackground='#8b00ff', **button_style
-        ).pack(side=tk.LEFT, padx=2, expand=True, fill=tk.BOTH)
 
     # ==================== RUBIKA SETTINGS ====================
     def create_rubika_settings_section(self, parent):
@@ -1060,7 +1017,7 @@ class GlassmorphicUI:
     # ==================== RSS STATUS ====================
     def create_rss_status_section(self, parent):
         tk.Label(
-            parent, text="▌ RSS SOURCES STATUS",
+            parent, text="▌ TELEGRAM SOURCE STATUS",
             font=self.font_manager.get_font("header"),
             bg=self.colors['bg_main'], fg=self.colors['neon_green']
         ).pack(anchor=tk.W, pady=(5, 3))
@@ -1325,24 +1282,6 @@ class GlassmorphicUI:
 
         self.root.after(1000, self.update_uptime)
 
-    def update_viral_breaking_stats(self):
-        if self.is_running and self.bot:
-            try:
-                if self.viral_label:
-                    viral_count = 0
-                    if hasattr(self.bot.news_pool, 'viral_size'):
-                        viral_count = self.bot.news_pool.viral_size()
-                    self.viral_label.config(text=str(viral_count))
-                if self.breaking_label:
-                    breaking_count = 0
-                    if hasattr(self.bot.news_pool, 'breaking_size'):
-                        breaking_count = self.bot.news_pool.breaking_size()
-                    self.breaking_label.config(text=str(breaking_count))
-            except:
-                pass
-
-        self.root.after(2000, self.update_viral_breaking_stats)
-
     def on_interval_change(self, value):
         interval_minutes = int(float(value))
         self.interval_display.config(text=f"{interval_minutes} min")
@@ -1395,17 +1334,11 @@ class GlassmorphicUI:
     def update_stats(self):
         if self.is_running and self.bot:
             try:
-                self.stat_labels['pool'].config(text=str(self.bot.news_pool.size()))
+                self.stat_labels['pool'].config(text=str(len(self.bot.pending_news)))
                 self.stat_labels['posted'].config(text=str(self.bot.daily_posts))
                 self.stat_labels['hour'].config(text=str(self.bot.hourly_posts))
-                self.stat_labels['videos'].config(text=str(self.bot.total_videos_posted))
                 self.stat_labels['dups'].config(text=str(self.bot.total_duplicates))
-                self.stat_labels['filtered'].config(text=str(self.bot.total_filtered_provinces))
 
-                cat_stats = self.bot.news_pool.get_stats()
-                for cat_name, label in self.category_labels.items():
-                    count = cat_stats.get(cat_name, 0)
-                    label.config(text=str(count))
             except:
                 pass
 
@@ -1442,9 +1375,7 @@ class GlassmorphicUI:
         self.log("═══════════════════════════════════════════════", "system")
         self.log("🚀 SYSTEM BOOTING...", "success")
         self.log(f"⏱ Fetch cycle set to {self.fetch_interval//60} minutes", "info")
-        self.log("🧠 Smart Pool Management: ENABLED", "success")
-        self.log("🔥 Viral Detection: ENABLED", "success")
-        self.log(f"🔁 Algorithm: Source Rotation ({len(SOURCE_ROTATION_CYCLE)} steps)", "success")
+        self.log("📥 Telegram @akhbarefori: enabled", "success")
         self.log("✍️ News Style: ENABLED (سبک خبری برای همه خبرها)", "success")
         self.log(f"📤 Publishing target: Rubika channel {channel} ONLY", "success")
         self.log("📡 Initializing Rubika Connection...", "warning")
@@ -1501,11 +1432,9 @@ class GlassmorphicUI:
         self.log("📌 Responsive Design: Active", "success")
         self.log("📌 Minimum Size: 1280x720", "success")
         self.log("📌 Auto-Scroll: Enabled", "success")
-        self.log(f"🔁 Source Rotation: Active ({len(SOURCE_ROTATION_CYCLE)} Steps) - تنها الگوریتم", "success")
         self.log("✍️ News Style: Active (سبک خبری برای همه خبرها)", "success")
         self.log("📌 Status Bar: Visible (maximized mode)", "success")
         self.log("🔘 F11: Toggle Fullscreen | ESC: Exit Fullscreen", "success")
-        self.log("🔥 Viral Detection: Active", "success")
         _token, _channel = load_rubika_config()
         if not _token or not _channel:
             self.log("⚠️ توکن/کانال روبیکا تنظیم نشده - بخش RUBIKA SETTINGS را کامل کنید", "warning")

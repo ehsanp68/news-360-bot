@@ -41,15 +41,16 @@ class PublishingTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(restarted._post_wait_seconds(), 300)
             b = restarted
             b.bot.send_message = send_message
-            b.news_pool.add_breaking(news(2))
-            b.news_pool.add_viral(news(3))
+            b.pending_news.extend([news(2), news(3)])
+            b.last_fetch_time = Clock.now()
+            b.fetch_interval = 10000
             b.is_running = True
 
             async def advance(seconds):
                 Clock.current += timedelta(seconds=seconds)
 
             with patch.object(bot.asyncio, 'sleep', advance):
-                await b.publish_loop_source_rotation()
+                await b.publish_loop()
             self.assertEqual(len(sent), 3)
             self.assertGreaterEqual((sent[1][0] - sent[0][0]).total_seconds(), 300)
             self.assertGreaterEqual((sent[2][0] - sent[1][0]).total_seconds(), 300)
