@@ -14,7 +14,6 @@ from datetime import datetime, timedelta
 import re
 from difflib import SequenceMatcher
 import hashlib
-import random
 import aiohttp
 import json
 import time
@@ -86,8 +85,7 @@ NEWS_SOURCES = {
 
 # ==================== تنظیمات زمانی ====================
 FETCH_INTERVAL = 30 * 60
-MIN_POST_DELAY = 120
-MAX_POST_DELAY = 200
+POST_INTERVAL = 5 * 60
 
 # ==================== ✅ چرخش منبع (الگوریتم انتشار) ====================
 # ساختار بهینه: (نوع, منبع, بازه_انتظار)
@@ -95,22 +93,22 @@ MAX_POST_DELAY = 200
 SOURCE_ROTATION_CYCLE = [
     # مرحله 1-2
     ('publish', 'ایرنا', None),
-    ('wait', None, (120, 160)),
+    ('wait', None, (POST_INTERVAL, POST_INTERVAL)),
     # مرحله 3-4
     ('publish', 'مهر', None),
-    ('wait', None, (120, 160)),
+    ('wait', None, (POST_INTERVAL, POST_INTERVAL)),
     # مرحله 5-6
     ('publish', 'خبرگزاری جوان', None),
-    ('wait', None, (120, 160)),
+    ('wait', None, (POST_INTERVAL, POST_INTERVAL)),
     # مرحله 7-8
     ('publish', 'ایرنا', None),
-    ('wait', None, (45, 60)),
+    ('wait', None, (POST_INTERVAL, POST_INTERVAL)),
     # مرحله 9-10
     ('publish', 'ایسنا', None),
-    ('wait', None, (120, 160)),
+    ('wait', None, (POST_INTERVAL, POST_INTERVAL)),
     # مرحله 11-12
     ('publish', 'مهر', None),
-    ('wait', None, (60, 75)),
+    ('wait', None, (POST_INTERVAL, POST_INTERVAL)),
 ]
 
 # ==================== تنظیمات محتوا ====================
@@ -586,6 +584,7 @@ class SmartNewsBot:
         self.log_callback = log_callback
         self.fetch_interval = FETCH_INTERVAL
         self.last_fetch_time = None
+        self.last_post_time = None
         self.news_pool.set_log_callback(log_callback)
 
 
@@ -729,6 +728,12 @@ class SmartNewsBot:
         for key in ('total_fetched', 'total_duplicates', 'total_videos_posted',
                     'total_filtered_provinces', 'total_breaking_posted'):
             setattr(self, key, int(data.get(key, 0)))
+        try:
+            self.last_post_time = datetime.fromisoformat(data['last_post_time'])
+            if self.last_post_time.tzinfo is not None:
+                self.last_post_time = None
+        except (KeyError, TypeError, ValueError):
+            pass
         self.source_stats = dict(data.get('source_stats', {}))
         self.log(f'📂 State loaded: {len(self.sent_links)} sent links (جلوگیری از ارسال تکراری)')
 
@@ -743,6 +748,7 @@ class SmartNewsBot:
                 'sent_titles': self.sent_titles[-500:],
                 'sent_hashes': list(self.sent_hashes)[-STATE_MAX_LINKS:],
                 'daily_posts': self.daily_posts,
+                'last_post_time': self.last_post_time.isoformat() if self.last_post_time else None,
                 'last_reset_date': self.last_reset_date.isoformat(),
                 'total_fetched': self.total_fetched,
                 'total_duplicates': self.total_duplicates,
@@ -779,7 +785,7 @@ class SmartNewsBot:
         # دامنه‌های بدون پروتکل + لینک کوتاه خبرگزاری‌ها (irna.ir/xjAB، t.me/… و ...)
         text = re.sub(
             r'\b(?:[a-zA-Z0-9-]+\.)+'
-            r'(?:ir|com|net|org|info|co|me|tv|news|press|online|link|ly|to|app|site|shop|club|fun|icu|xyz|top)'
+            r'[a-zA-Z]{2,}'
             r'(?:/\S*)?',
             '', text, flags=re.IGNORECASE)
         # برچسب‌های بی‌لینکِ باقی‌مانده در انتهای متن («مشروح خبر:»، «لینک خبر» و ...)
@@ -972,31 +978,27 @@ class SmartNewsBot:
             self.hourly_reset_time = now
 
     # ==================== قالب پیام (متن ساده برای روبیکا) ====================
-    async def _format(self, news):
-        source = news.get('source', '')
+    def _format_text(self, news):
+        # حذف ارجاع رایج به خبرگزاری در ابتدای متن RSS، علاوه بر حذف لینک‌ها.
         title = self._news_style(news.get('title', ''), is_title=True)
-        summary = self._news_style(news.get('summary', ''))
-        emoji = news.get('emoji', '📰')
-        header = '🔴 🚨🚨 خبر فوری\n\n' if news.get('is_breaking') else ''
-        return (
-            f'{header}{emoji} {title}\n\n'
-            f'{summary}\n\n'
-            f'📌 منبع: {source}\n\n'
-            f'📢 {self.channel_id}'
-        ).strip()
+        summary = news.get('summary', '') or ''
+        source = news.get('source', '') or ''
+        if source:
+            summary = re.sub(r'^\s*به گزارش\s+(?:خبرگزاری\s+)?' +
+                             re.escape(source) + r'\s*[,،:]\s*', '', summary)
+        summary = self._news_style(summary)
+        return '\n\n'.join(part for part in (title, summary) if part)
+
+    async def _format(self, news):
+        return self._format_text(news)
 
     def _format_viral(self, news):
-        source = news.get('source', '')
-        title = self._news_style(news.get('title', ''), is_title=True)
-        summary = self._news_style(news.get('summary', ''))
-        emoji = news.get('emoji', '🔥')
-        header = '🔴 🔥🔥 خبر وایرال - بازتاب گسترده\n\n'
-        return (
-            f'{header}{emoji} {title}\n\n'
-            f'{summary}\n\n'
-            f'📌 منبع: {source}\n\n'
-            f'📢 {self.channel_id}'
-        ).strip()
+        return self._format_text(news)
+
+    def _post_wait_seconds(self):
+        if self.last_post_time is None:
+            return 0
+        return max(0, POST_INTERVAL - (datetime.now() - self.last_post_time).total_seconds())
 
     def _reset_counters(self):
         today = datetime.now().date()
@@ -1016,6 +1018,7 @@ class SmartNewsBot:
             self._mark_sent(news['title'])
             self.daily_posts += 1
             self.hourly_posts += 1
+            self.last_post_time = datetime.now()
             self.total_breaking_posted += 1
             self._save_state()
             self.log(f'🚨 BREAKING SENT: {news["title"][:60]}...')
@@ -1033,25 +1036,12 @@ class SmartNewsBot:
             news['is_viral'] = True
             msg = self._format_viral(news)
 
-            if INCLUDE_IMAGES and news.get('image_url'):
-                try:
-                    await self.bot.send_photo(
-                        chat_id=self.channel_id,
-                        photo=news['image_url'],
-                        caption=msg[:RUBIKA_MAX_CAPTION_LENGTH]
-                    )
-                except:
-                    await self.bot.send_message(
-                        chat_id=self.channel_id, text=msg
-                    )
-            else:
-                await self.bot.send_message(
-                    chat_id=self.channel_id, text=msg
-                )
+            await self.bot.send_message(chat_id=self.channel_id, text=msg)
             self.sent_links.add(news.get('link', ''))
             self._mark_sent(news.get('title', ''))
             self.daily_posts += 1
             self.hourly_posts += 1
+            self.last_post_time = datetime.now()
             self._save_state()
             self.log(f'🔥 VIRAL SENT: {news.get("title", "")[:50]}...')
             return True
@@ -1067,37 +1057,12 @@ class SmartNewsBot:
             if news['link'] in self.sent_links:
                 return False
             msg = await self._format(news)
-            if INCLUDE_IMAGES and news.get('image_url'):
-                try:
-                    await self.bot.send_photo(
-                        chat_id=self.channel_id,
-                        photo=news['image_url'],
-                        caption=msg[:RUBIKA_MAX_CAPTION_LENGTH]
-                    )
-                except:
-                    await self.bot.send_message(
-                        chat_id=self.channel_id, text=msg
-                    )
-            elif INCLUDE_VIDEOS and news.get('video_url'):
-                try:
-                    await self.bot.send_video(
-                        chat_id=self.channel_id,
-                        video=news['video_url'],
-                        caption=msg[:RUBIKA_MAX_CAPTION_LENGTH]
-                    )
-                    self.total_videos_posted += 1
-                except:
-                    await self.bot.send_message(
-                        chat_id=self.channel_id, text=msg
-                    )
-            else:
-                await self.bot.send_message(
-                    chat_id=self.channel_id, text=msg
-                )
+            await self.bot.send_message(chat_id=self.channel_id, text=msg)
             self.sent_links.add(news['link'])
             self._mark_sent(news['title'])
             self.daily_posts += 1
             self.hourly_posts += 1
+            self.last_post_time = datetime.now()
             self._save_state()
             self.log(f'✅ [{news["category"]}] {news["title"][:50]}...')
             return True
@@ -1115,13 +1080,18 @@ class SmartNewsBot:
         - خبر وایرال 🔥 در اولویت دوم منتشر می‌شود
         - سپس حلقه روی SOURCE_ROTATION_CYCLE
         - اگر خبری از منبع نبود: step += 2 (رد کردن مرحله انتظار)
-        - اگر خبری بود: step += 1 (حرکت به مرحله انتظار)
+        - پس از انتشار، همه خبرها تا گذشت ۵ دقیقه منتظر می‌مانند
         - در پایان چرخه: بازگشت به مرحله 0
         """
         self.log('🔄 🔁 SOURCE ROTATION LOOP STARTED\n')
         self.log(f'📋 Cycle length: {self.rotation_cycle_length} steps')
         
         while self.is_running:
+            # همه خبرها، از جمله فوری و وایرال، مشمول فاصله یکسان هستند.
+            remaining = self._post_wait_seconds()
+            if remaining > 0:
+                await asyncio.sleep(min(remaining, 1))
+                continue
             # ✅ خبر فوری همیشه اولویت دارد
             if self.news_pool.has_breaking():
                 brk = self.news_pool.get_next_breaking()
@@ -1187,8 +1157,8 @@ class SmartNewsBot:
                 
                 if sent:
                     self.log(f'✅ Step {step_number}: Published from [{source_name}]')
-                    # ✅ خبر با موفقیت ارسال شد → +1 (حرکت به مرحله انتظار)
-                    self.rotation_step = (self.rotation_step + 1) % self.rotation_cycle_length
+                    # ✅ حرکت به منبع بعدی؛ فاصله انتشار در ابتدای حلقه اعمال می‌شود
+                    self.rotation_step = (self.rotation_step + 2) % self.rotation_cycle_length
                 else:
                     # ❌ ارسال ناموفق → +2 (رد کردن انتظار)
                     self.log(f'❌ Step {step_number}: Failed to send from [{source_name}] → Skip')
@@ -1197,22 +1167,7 @@ class SmartNewsBot:
                 await asyncio.sleep(2)
                 
             elif step_type == 'wait':
-                # ✅ مرحله انتظار
-                min_wait, max_wait = wait_range
-                wait_seconds = random.randint(min_wait, max_wait)
-                
-                self.log(f'\n⏳ Step {step_number}/{self.rotation_cycle_length}: Waiting {wait_seconds}s ({wait_seconds//60}m {wait_seconds%60}s)')
-                
-                # ✅ انتظار با قابلیت قطع شدن
-                for _ in range(wait_seconds):
-                    if not self.is_running:
-                        return
-                    if self.news_pool.has_breaking() or self.news_pool.has_viral():
-                        self.log('🚨/🔥 Breaking/Viral interrupts wait!')
-                        break
-                    await asyncio.sleep(1)
-                
-                # ✅ پس از انتظار → +1 (حرکت به مرحله انتشار بعدی)
+                # فاصله انتشار در ابتدای حلقه اعمال می‌شود.
                 self.rotation_step = (self.rotation_step + 1) % self.rotation_cycle_length
 
     def _secs_to_fetch(self):
@@ -1240,7 +1195,7 @@ class SmartNewsBot:
                 self.log(f'⚠️ بررسی کانال ناموفق: {e}')
                 self.log('⚠️ مطمئن شوید ربات در کانال روبیکا عضو و ادمین باشد')
             self.log(f'⏱️ Interval: {self.fetch_interval//60}m')
-            self.log(f'⏸️ Post delay: {MIN_POST_DELAY}-{MAX_POST_DELAY}s')
+            self.log(f'⏸️ Post delay: {POST_INTERVAL}s')
             self.log(f'🔥 Viral Detection: Active (دقیق - چندمنبعی با پنجره زمانی)')
             self.log(f'🚨 Breaking Detection: Active (دقیق - امتیازدهی وزنی)')
             self.log(f'✍️ News Style: Active (سبک خبری روی همه خبرها)')

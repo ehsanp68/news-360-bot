@@ -157,7 +157,7 @@ async def test_smart_bot(base_url):
     assert ok
     text = received["messages"][-1]["text"]
     assert "<b>" not in text and "<a href" not in text and "&amp;" not in text, "پیام باید متن ساده باشد"
-    assert CHANNEL in text and "ایرنا" in text
+    assert CHANNEL not in text and "ایرنا" not in text and "منبع" not in text
     assert news["link"] not in text and "لینک خبر" not in text, "لینک خبر نباید در پست باشد"
     assert "http" not in text, "هیچ لینکی نباید در پست باشد"
     print("✅ domestic post → Rubika channel (plain text, NO link) OK")
@@ -170,23 +170,23 @@ async def test_smart_bot(base_url):
     news_photo = dict(news, link="https://example.com/news/2",
                       image_url=f"{base_url}/media/photo2.jpg")
     ok = await news_bot._send_domestic_direct(news_photo)
-    assert ok and received["files"][-1]["file_id"]
-    print("✅ domestic post with photo → sendFile OK")
+    assert ok and received["messages"][-1]["text"] == text
+    print("✅ photo ignored; text-only post OK")
 
     news_video = dict(news, link="https://example.com/news/3",
                       video_url=f"{base_url}/media/clip2.mp4")
     ok = await news_bot._send_domestic_direct(news_video)
-    assert ok and news_bot.total_videos_posted == 1
-    print("✅ domestic post with video → sendFile OK")
+    assert ok and received["messages"][-1]["text"] == text
+    print("✅ video ignored; text-only post OK")
 
     breaking = dict(news, link="https://example.com/news/4", is_breaking=True)
     ok = await news_bot._send_breaking(breaking)
-    assert ok and "خبر فوری" in received["messages"][-1]["text"]
+    assert ok and received["messages"][-1]["text"] == text
     print("✅ breaking post OK")
 
     viral = dict(news, link="https://example.com/news/5", is_viral=True)
     ok = await news_bot._send_viral(viral)
-    assert ok and "وایرال" in received["messages"][-1]["text"]
+    assert ok and received["messages"][-1]["text"] == text
     assert "http" not in received["messages"][-1]["text"], "پست وایرال هم نباید لینک داشته باشد"
     print("✅ viral post (no link) OK")
 
