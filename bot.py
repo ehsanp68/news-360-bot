@@ -77,6 +77,10 @@ SUMMARY_WORDS = 90
 
 # ==================== ✍️ سبک خبری (اعمال روی همه خبرها) ====================
 NEWS_STYLE_ENABLED = True
+
+# ==================== 🏁 فوتر ثابت پایین همه پست‌ها ====================
+IRAN_FLAG_EMOJI = '🇮🇷'          # پرچم ایران - همیشه پایین پست
+FIST_EMOJIS = '✊👊🤜🤛💪'        # ایموجی مشت گره‌کرده (همراه «Link» در انتهای برخی خبرها)
 _DIGITS_TO_FA = str.maketrans('0123456789' + '٠١٢٣٤٥٦٧٨٩', '۰۱۲۳۴۵۶۷۸۹' * 2)
 _DIGITS_TO_EN = str.maketrans('۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩', '0123456789' * 2)
 
@@ -724,6 +728,9 @@ class SmartNewsBot:
         text = re.sub(r'[^.؟!؛\n]*لینک[^.؟!؛\n]*[:：]\s*$', '', text)
         text = re.sub(r'(?:لینک|مشروح|جزئیات|متن کامل|ادامه)\s*(?:خبر|مطلب)?\s*[:：]\s*$', '', text)
         text = re.sub(r'لینک\s+(?:خبر|مطلب|مشروح خبر)\s*$', '', text)
+        # کلمه انگلیسی «Link» همراه ایموجی مشت گره‌کرده در انتهای متن/خط
+        text = re.sub(r'(?im)\blink\b[\s:：]*[' + FIST_EMOJIS + r']*\s*$', '', text)
+        text = re.sub(r'(?im)^\s*[' + FIST_EMOJIS + r'\s]*\blink\b\s*$', '', text)
         # حرف اضافه بی‌مفعول در انتهای متن (بعد از حذف لینک)
         text = re.sub(r'\s+(?:در|از|به|با|برای)\s*$', '', text.strip())
         return text.strip()
@@ -878,7 +885,7 @@ class SmartNewsBot:
         return sorted(posts)
 
     def _telegram_item(self, post_id, text, media=None):
-        # Remove channel handles, source/credit lines and URLs, never add a footer.
+        # Remove channel handles, source/credit lines and URLs; the fixed footer is added at send time.
         lines = []
         for line in text.splitlines():
             line = self._strip_breaking_phrase(re.sub(r'@[A-Za-z0-9_]+', '', line))
@@ -1009,6 +1016,25 @@ class SmartNewsBot:
     def _format_viral(self, news):
         return self._format_text(news)
 
+    # ==================== 🏁 فوتر ثابت پایین همه پست‌ها ====================
+    def _rubika_channel_address(self):
+        """آدرس عمومی کانال روبیکا (مثلاً https://rubika.ir/news360_24)"""
+        channel = (self.channel_id or RUBIKA_CHANNEL_ID or '').strip().lstrip('@')
+        return f'https://rubika.ir/{channel}' if channel else ''
+
+    def _post_footer(self):
+        """فوتر ثابت پایین هر پست: آدرس کانال روبיקה + پرچم ایران"""
+        address = self._rubika_channel_address()
+        return '\n'.join(part for part in (address, IRAN_FLAG_EMOJI) if part)
+
+    def _with_footer(self, text):
+        """افزودن فوتر ثابت به انتهای متن پست (روی همه پست‌ها اعمال می‌شود)"""
+        footer = self._post_footer()
+        if not footer:
+            return text
+        text = (text or '').strip()
+        return f'{text}\n\n{footer}' if text else footer
+
     def _post_wait_seconds(self, news=None):
         """Seconds until this post has reached its own Telegram +2 min deadline."""
         if news is None:
@@ -1037,7 +1063,7 @@ class SmartNewsBot:
         try:
             if news['link'] in self.sent_links:
                 return False
-            msg = await self._format(news)
+            msg = self._with_footer(await self._format(news))
             await self.bot.send_message(chat_id=self.channel_id, text=msg)
             self.sent_links.add(news['link'])
             self._mark_sent(news['title'])
@@ -1059,7 +1085,7 @@ class SmartNewsBot:
         try:
             news['emoji'] = '🔥'
             news['is_viral'] = True
-            msg = self._format_viral(news)
+            msg = self._with_footer(self._format_viral(news))
 
             await self.bot.send_message(chat_id=self.channel_id, text=msg)
             self.sent_links.add(news.get('link', ''))
@@ -1117,6 +1143,7 @@ class SmartNewsBot:
                        else await self._format(news))
                 news['rendered_text'] = msg
                 self._save_state()
+            msg = self._with_footer(msg)
             # Queues saved by older versions did not record media. Look up the
             # original Telegram post before publishing so attachments are not lost.
             if ('media' not in news and re.fullmatch(r'https://t\.me/akhbarefori/\d+', news['link'])

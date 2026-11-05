@@ -37,7 +37,10 @@ class TelegramMediaTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('عنوان خبر', sent[0][2])
         self.assertNotIn('خبر فوری', sent[0][2])
         self.assertNotIn('خبر‌ فوری', sent[0][2])
-        self.assertNotIn('http', sent[0][2])
+        # The only URL allowed in a post is the fixed Rubika channel footer.
+        self.assertNotIn('http', sent[0][2].replace('https://rubika.ir/rubika', ''))
+        self.assertIn('https://rubika.ir/rubika', sent[0][2])
+        self.assertTrue(sent[0][2].endswith('🇮🇷'))
         self.assertEqual(sent[1][2], '')
 
     async def test_partial_failure_resumes_after_restart_without_repeating_media(self):
@@ -94,7 +97,8 @@ class TelegramMediaTests(unittest.IsolatedAsyncioTestCase):
         async def message(chat_id, text): delivered.append(text)
         self.b.bot.send_photo, self.b.bot.send_message = photo, message
         self.assertTrue(await self.b._send_domestic_direct(item))
-        self.assertEqual(''.join(delivered), await self.b._format(item))
+        self.assertEqual(''.join(delivered), self.b._with_footer(await self.b._format(item)))
+        self.assertTrue(delivered[-1].endswith('🇮🇷'))
         media_only = self.b._telegram_item(9, '', [{'type': 'video', 'url': 'https://cdn.example/v.mp4'}])
         self.b.pending_news = [media_only]
         self.b._save_state()
