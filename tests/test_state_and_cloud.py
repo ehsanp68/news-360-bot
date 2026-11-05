@@ -84,11 +84,10 @@ async def test_cloud_runner(base_url, tmp):
 
         async def fetch_all_news(self, is_initial=False):
             # یک خبر در مخزن می‌گذاریم تا ربات واقعاً پست کند
-            self.news_pool.add_domestic({
+            self.pending_news.append({
                 "title": "خبر ابری آزمایشی", "summary": "خلاصه",
                 "link": f"https://example.com/cloud/{datetime.now().timestamp()}",
                 "source": "ایرنا", "category": "عمومی", "emoji": "📰",
-                "fetched_at": datetime.now(),
             })
             self.last_fetch_time = datetime.now()
 

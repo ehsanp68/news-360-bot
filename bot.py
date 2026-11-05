@@ -1,14 +1,5 @@
-"""
-Rubika News Bot - Source Rotation
-✅ الگوریتم انتشار: Source Rotation (چرخش منبع) - تنها الگوریتم انتشار
-✅ سبک خبری روی همه خبرها (اعداد فارسی، نگارش صحیح، پاک‌سازی متن)
-✅ تشخیص دقیق خبر فوری 🚨 (امتیازدهی وزنی + گارد تکذیب)
-✅ تشخیص دقیق خبر وایرال 🔥 (چندمنبعی + پنجره زمانی + گارد اعداد)
-✅ انتشار فقط و فقط در کانال روبیکا (Rubika-only publishing)
-✅ فقط منابع خبری داخلی - بدون لینک خبر در پست‌ها
-"""
+"""Relay public Telegram channel posts to a Rubika channel."""
 import asyncio
-import feedparser
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 import re
@@ -18,7 +9,6 @@ import aiohttp
 import json
 import time
 import os
-import requests
 
 # ==================== تنظیمات اصلی (فقط روبیکا) ====================
 # این ربات اخبار را فقط و فقط در کانال روبیکا منتشر می‌کند.
@@ -70,46 +60,13 @@ STATE_FILE = os.environ.get('BOT_STATE_FILE') or os.path.join(
     os.path.dirname(os.path.abspath(__file__)), 'state', 'bot_state.json')
 STATE_MAX_LINKS = 5000
 
-# ==================== ✅ الگوریتم انتشار (تک‌الگوریتم) ====================
-ALGORITHM_SOURCE_ROTATION = "source_rotation"    # تنها الگوریتم انتشار: چرخش منبع
-
-# ==================== منابع خبری ====================
-NEWS_SOURCES = {
-    'ایرنا': 'https://www.irna.ir/rss',
-    'ایسنا': 'https://www.isna.ir/rss',
-    'مهر': 'https://www.mehrnews.com/rss',
-    'فارس': 'https://www.farsnews.ir/rss/allnews',
-    'خبرآنلاین': 'https://www.khabaronline.ir/rss/allnews',
-    'خبرگزاری جوان': 'https://www.yjc.ir/fa/rss/allnews',
-}
-
-# ==================== تنظیمات زمانی ====================
-FETCH_INTERVAL = 30 * 60
+# Telegram's public channel preview, no Telegram credentials required.
+TELEGRAM_CHANNEL = 'akhbarefori'
+TELEGRAM_URL = f'https://t.me/s/{TELEGRAM_CHANNEL}'
+NEWS_SOURCES = {'@akhbarefori': TELEGRAM_URL}  # for the GUI status indicator
+FETCH_INTERVAL = 5 * 60
 POST_INTERVAL = 5 * 60
-
-# ==================== ✅ چرخش منبع (الگوریتم انتشار) ====================
-# ساختار بهینه: (نوع, منبع, بازه_انتظار)
-# نوع: 'publish' = انتشار خبر | 'wait' = انتظار
-SOURCE_ROTATION_CYCLE = [
-    # مرحله 1-2
-    ('publish', 'ایرنا', None),
-    ('wait', None, (POST_INTERVAL, POST_INTERVAL)),
-    # مرحله 3-4
-    ('publish', 'مهر', None),
-    ('wait', None, (POST_INTERVAL, POST_INTERVAL)),
-    # مرحله 5-6
-    ('publish', 'خبرگزاری جوان', None),
-    ('wait', None, (POST_INTERVAL, POST_INTERVAL)),
-    # مرحله 7-8
-    ('publish', 'ایرنا', None),
-    ('wait', None, (POST_INTERVAL, POST_INTERVAL)),
-    # مرحله 9-10
-    ('publish', 'ایسنا', None),
-    ('wait', None, (POST_INTERVAL, POST_INTERVAL)),
-    # مرحله 11-12
-    ('publish', 'مهر', None),
-    ('wait', None, (POST_INTERVAL, POST_INTERVAL)),
-]
+TELEGRAM_MAX_PAGES = 100
 
 # ==================== تنظیمات محتوا ====================
 INCLUDE_IMAGES = True
@@ -514,32 +471,6 @@ class BalancedNewsPool:
     def domestic_size(self):
         return sum(len(v) for v in self.domestic_news.values())
 
-    # ==================== ✅ دریافت خبر از منبع مشخص (چرخش منبع) ====================
-    def get_next_from_source(self, source_name):
-        """✅ دریافت اولین خبر از منبع مشخص (برای الگوریتم چرخش منبع)
-        
-        Args:
-            source_name: نام منبع (مثلاً 'ایرنا', 'مهر')
-        
-        Returns:
-            tuple: (item, source_type) یا (None, None)
-            source_type: همیشه 'domestic'
-        """
-        if not source_name:
-            return None, None
-        
-        # ✅ جستجو در اخبار داخلی
-        for cat in self.domestic_news.keys():
-            items = self.domestic_news.get(cat, [])
-            for i, item in enumerate(items):
-                if item.get('source') == source_name:
-                    self.domestic_news[cat].pop(i)
-                    self.domestic_post_count[cat] += 1
-                    self.last_domestic_source = source_name
-                    return item, 'domestic'
-        
-        return None, None
-
     def size(self):
         return self.domestic_size() + self.breaking_size() + self.viral_size()
 
@@ -562,7 +493,6 @@ class SmartNewsBot:
         self.channel_id = channel
         self.bot = RubikaBot(token=token)
         self.rubika_connected = False
-        self.news_pool = BalancedNewsPool()
         self.sent_links = set()
         self.sent_titles = []
         self.sent_hashes = set()
@@ -585,12 +515,10 @@ class SmartNewsBot:
         self.fetch_interval = FETCH_INTERVAL
         self.last_fetch_time = None
         self.last_post_time = None
-        self.news_pool.set_log_callback(log_callback)
 
 
-        # ✅ الگوریتم انتشار: Source Rotation (تنها الگوریتم)
-        self.rotation_step = 0  # شمارنده مرحله فعلی
-        self.rotation_cycle_length = len(SOURCE_ROTATION_CYCLE)
+        self.pending_news = []
+        self.telegram_cursor = None
 
         # ✅ بارگذاری وضعیت قبلی (برای جلوگیری از ارسال تکراری بعد از ری‌استارت)
         self._load_state()
@@ -602,20 +530,6 @@ class SmartNewsBot:
                 self.log_callback(msg)
             except:
                 pass
-
-    # ==================== ✅ اطلاعات الگوریتم انتشار ====================
-    def get_current_step_info(self):
-        """✅ دریافت اطلاعات مرحله فعلی چرخش منبع (برای UI)"""
-        step_type, source, wait_range = SOURCE_ROTATION_CYCLE[self.rotation_step]
-        step_number = self.rotation_step + 1  # شماره مرحله (1-based)
-        
-        return {
-            'step_number': step_number,
-            'step_type': step_type,
-            'source': source,
-            'wait_range': wait_range,
-            'total_steps': self.rotation_cycle_length,
-        }
 
     def _should_filter_province(self, title, summary=''):
         text = (title + ' ' + summary).lower()
@@ -734,6 +648,10 @@ class SmartNewsBot:
                 self.last_post_time = None
         except (KeyError, TypeError, ValueError):
             pass
+        self.pending_news = [item for item in data.get('pending_news', [])
+                             if isinstance(item, dict) and item.get('link') and item.get('title')]
+        cursor = data.get('telegram_cursor')
+        self.telegram_cursor = cursor if isinstance(cursor, int) and cursor > 0 else None
         self.source_stats = dict(data.get('source_stats', {}))
         self.log(f'📂 State loaded: {len(self.sent_links)} sent links (جلوگیری از ارسال تکراری)')
 
@@ -749,6 +667,8 @@ class SmartNewsBot:
                 'sent_hashes': list(self.sent_hashes)[-STATE_MAX_LINKS:],
                 'daily_posts': self.daily_posts,
                 'last_post_time': self.last_post_time.isoformat() if self.last_post_time else None,
+                'pending_news': self.pending_news,
+                'telegram_cursor': self.telegram_cursor,
                 'last_reset_date': self.last_reset_date.isoformat(),
                 'total_fetched': self.total_fetched,
                 'total_duplicates': self.total_duplicates,
@@ -893,83 +813,91 @@ class SmartNewsBot:
         return None
 
     # ==================== جمع‌آوری ====================
+    @staticmethod
+    def _parse_telegram_page(html):
+        """Read message IDs and text from Telegram's public web preview."""
+        soup = BeautifulSoup(html, 'html.parser')
+        posts = []
+        for message in soup.select('.tgme_widget_message[data-post]'):
+            post = message.get('data-post', '')
+            match = re.fullmatch(r'akhbarefori/(\d+)', post, re.IGNORECASE)
+            if not match:
+                continue
+            text_node = message.select_one('.tgme_widget_message_text')
+            text = ''
+            if text_node:
+                for anchor in text_node.find_all('a', href=True):
+                    if re.search(r'(?:t\.me|telegram\.me)/akhbarefori(?:/|$|[?#])', anchor['href'], re.IGNORECASE):
+                        anchor.decompose()
+                for br in text_node.find_all('br'):
+                    br.replace_with('\n')
+                text = text_node.get_text().strip()
+            posts.append((int(match.group(1)), text))
+        return sorted(posts)
+
+    def _telegram_item(self, post_id, text):
+        # Remove channel handles, source/credit lines and URLs, never add a footer.
+        lines = []
+        for line in text.splitlines():
+            line = re.sub(r'@[A-Za-z0-9_]+', '', line)
+            if re.match(r'^\s*(?:📌\s*)?(?:منبع|لینک خبر)\s*[:：]', line):
+                continue
+            line = self._style_strip_links(line).strip()
+            if line and re.search(r'[\w]', line):
+                lines.append(line)
+        if not lines:
+            return None  # media-only or empty posts cannot be relayed as text
+        return {'title': lines[0], 'summary': '\n'.join(lines[1:]),
+                'link': f'https://t.me/{TELEGRAM_CHANNEL}/{post_id}',
+                'source': '@akhbarefori', 'category': 'عمومی'}
+
     async def fetch_all_news(self, is_initial=False):
-        label = 'INITIAL' if is_initial else f'REFRESH #{self.cycle_count}'
-        self.log(f'\n{"="*70}\n📥 FETCH - {label}\n{"="*70}')
-        cycle_hashes = set()
-        n_breaking = n_domestic = n_dup = 0
-        self.log('\n🇮🇷 Domestic sources...\n')
-        for source, url in NEWS_SOURCES.items():
-            try:
-                start_time = time.time()
-                headers = {'User-Agent': 'Mozilla/5.0'}
-                response = requests.get(url, headers=headers, timeout=10)
-                feed = feedparser.parse(response.content)
-                response_time = (time.time() - start_time) * 1000
-                if not feed.entries:
-                    self.rss_health_check[source] = 'offline'
-                    continue
-                self.rss_health_check[source] = 'slow' if response_time > 3000 else 'online'
-                s_new = s_brk = 0
-                for entry in feed.entries[:15]:
-                    title = self._news_style(getattr(entry, 'title', '').strip(), is_title=True)
-                    link = entry.get('link', '')
-                    if not title:
-                        continue
-                    th = self._title_hash(title)
-                    if self._is_duplicate(title) or th in cycle_hashes or link in self.sent_links:
-                        n_dup += 1
-                        continue
-                    cycle_hashes.add(th)
-                    summary = self._news_style(self._summarize(entry.get('summary', entry.get('description', '')), SUMMARY_WORDS))
-                    if self._should_filter_province(title, summary):
-                        continue
-                    cat, emoji = self._detect_category(title, summary)
-                    item = {
-                        'title': title, 'link': link, 'source': source, 'summary': summary,
-                        'image_url': self._extract_image(entry) if INCLUDE_IMAGES else None,
-                        'video_url': self._extract_video(entry) if INCLUDE_VIDEOS else None,
-                        'category': cat, 'emoji': emoji, 'fetched_at': datetime.now(),
-                    }
-                    if self._is_breaking_news(title, summary):
-                        item['emoji'] = '🚨'
-                        self.news_pool.add_breaking(item)
-                        s_brk += 1
-                        n_breaking += 1
-                    else:
-                        self.news_pool.add_domestic(item)
-                        s_new += 1
-                        n_domestic += 1
-                    self.source_stats[source] = self.source_stats.get(source, 0) + 1
-                self.log(f'✅ {source}: {s_new} new ({response_time:.0f}ms)')
-                await asyncio.sleep(0.3)
-            except Exception as e:
-                self.rss_health_check[source] = 'offline'
-                self.log(f'❌ {source}: {e}')
-
-        self.log('\n🔥 Checking for viral news...')
-        viral_detected = 0
-        for cat in list(self.news_pool.domestic_news.keys()):
-            items = self.news_pool.domestic_news[cat]
-            keep_items = []
-            for item in items:
-                if self.news_pool.check_and_mark_viral(item['title'], item['source']):
-                    viral_detected += 1
-                    self.news_pool.add_viral(item)
-                    self.log(f"🔥 VIRAL [FA]: {item['title'][:50]}...")
-                else:
-                    keep_items.append(item)
-            self.news_pool.domestic_news[cat] = keep_items
-
-        if viral_detected > 0:
-            self.log(f"🔥 Total viral news detected: {viral_detected}")
-        else:
-            self.log("ℹ️ No viral news in this cycle")
-
-        self.total_fetched += n_domestic
-        self.total_duplicates += n_dup
+        """Poll the public preview; walk older pages to avoid gaps after downtime."""
         self.last_fetch_time = datetime.now()
-        self.log(f'\n📊 FETCH DONE | 🚨{n_breaking} 📰{n_domestic} 🔄{n_dup} 📦pool={self.news_pool.size()}\n')
+        self.next_fetch_time = self.last_fetch_time + timedelta(seconds=self.fetch_interval)
+        try:
+            all_posts = {}
+            before = None
+            cursor = self.telegram_cursor
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
+                for _ in range(TELEGRAM_MAX_PAGES):
+                    params = {'before': before} if before is not None else None
+                    async with session.get(TELEGRAM_URL, params=params,
+                                           headers={'User-Agent': 'Mozilla/5.0'}) as response:
+                        response.raise_for_status()
+                        posts = self._parse_telegram_page(await response.text())
+                    if not posts:
+                        if before is None:
+                            raise ValueError('Telegram preview contains no posts')
+                        break
+                    for post_id, text in posts:
+                        if cursor is None or post_id > cursor:
+                            all_posts[post_id] = text
+                    oldest = posts[0][0]
+                    if cursor is None or oldest <= cursor:
+                        break
+                    if before is not None and oldest >= before:
+                        raise ValueError('Telegram pagination did not advance')
+                    before = oldest
+                else:
+                    raise ValueError('Telegram history exceeds pagination limit; no cursor advanced')
+            queued = {item['link'] for item in self.pending_news}
+            count = 0
+            for post_id, text in sorted(all_posts.items()):
+                item = self._telegram_item(post_id, text)
+                if item and item['link'] not in self.sent_links and item['link'] not in queued:
+                    self.pending_news.append(item)
+                    queued.add(item['link'])
+                    count += 1
+            if all_posts:
+                self.telegram_cursor = max(all_posts)
+            self.total_fetched += count
+            self.rss_health_check['@akhbarefori'] = 'online'
+            self._save_state()
+            self.log(f'✅ Telegram @akhbarefori: {count} new posts, {len(self.pending_news)} queued')
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as e:
+            self.rss_health_check['@akhbarefori'] = 'offline'
+            self.log(f'❌ Telegram @akhbarefori fetch failed: {e}')
 
     def _reset_hourly(self):
         now = datetime.now()
@@ -1070,105 +998,27 @@ class SmartNewsBot:
             self.log(f'❌ post: {e}')
             return False
 
-    # ==================== ✅ الگوریتم 1: Smart Priority Loop ====================
-    # ==================== ✅ حلقه انتشار: Source Rotation ====================
-    async def publish_loop_source_rotation(self):
-        """✅ الگوریتم انتشار: Source Rotation (چرخش منبع) - تنها الگوریتم
-        
-        ساختار:
-        - خبر فوری 🚨 همیشه اولویت اول دارد
-        - خبر وایرال 🔥 در اولویت دوم منتشر می‌شود
-        - سپس حلقه روی SOURCE_ROTATION_CYCLE
-        - اگر خبری از منبع نبود: step += 2 (رد کردن مرحله انتظار)
-        - پس از انتشار، همه خبرها تا گذشت ۵ دقیقه منتظر می‌مانند
-        - در پایان چرخه: بازگشت به مرحله 0
-        """
-        self.log('🔄 🔁 SOURCE ROTATION LOOP STARTED\n')
-        self.log(f'📋 Cycle length: {self.rotation_cycle_length} steps')
-        
+    async def publish_loop(self):
+        """Relay messages in channel order, with a five-minute minimum interval."""
         while self.is_running:
-            # همه خبرها، از جمله فوری و وایرال، مشمول فاصله یکسان هستند.
-            remaining = self._post_wait_seconds()
-            if remaining > 0:
-                await asyncio.sleep(min(remaining, 1))
-                continue
-            # ✅ خبر فوری همیشه اولویت دارد
-            if self.news_pool.has_breaking():
-                brk = self.news_pool.get_next_breaking()
-                self.log('\n🚨🚨🚨 BREAKING NEWS! 🚨🚨🚨')
-                await self._send_breaking(brk)
-                await asyncio.sleep(5)
-                continue
-
-            # ✅ خبر وایرال در اولویت دوم (بازتاب گسترده = حساس به زمان)
-            if self.news_pool.has_viral():
-                viral = self.news_pool.get_next_viral()
-                self.log('\n🔥🔥 VIRAL NEWS! 🔥')
-                await self._send_viral(viral)
-                await asyncio.sleep(5)
-                continue
-
-            # ✅ زمان Fetch
             now = datetime.now()
-            if self.last_fetch_time is None or \
-               (now - self.last_fetch_time).total_seconds() >= self.fetch_interval:
+            if self.last_fetch_time is None or (now - self.last_fetch_time).total_seconds() >= self.fetch_interval:
                 self.cycle_count += 1
-                self.log(f'\n⏰ FETCH TIME! Cycle #{self.cycle_count}')
                 await self.fetch_all_news()
-                self.next_fetch_time = now + timedelta(seconds=self.fetch_interval)
-
-            # ✅ بررسی خالی بودن مخزن
-            if self.news_pool.size() == 0:
-                rem = self._secs_to_fetch()
-                self.log(f'💤 Pool empty | next fetch: {rem//60}m {rem%60:02d}s')
-                await asyncio.sleep(30)
-                continue
-
-            # ✅ ✅ ✅ منطق اصلی الگوریتم 2
-            step_type, source_name, wait_range = SOURCE_ROTATION_CYCLE[self.rotation_step]
-            step_number = self.rotation_step + 1  # شماره 1-based برای نمایش
-
-            if step_type == 'publish':
-                # ✅ مرحله انتشار خبر
-                self.log(f'\n📍 Step {step_number}/{self.rotation_cycle_length}: Publishing from [{source_name}]')
-                
-                # ✅ دریافت خبر از منبع مشخص
-                news, news_type = self.news_pool.get_next_from_source(source_name)
-                
-                if news is None:
-                    # ❌ خبری از این منبع نیست → +2 (رد کردن انتظار)
-                    self.log(f'⚠️ No news from [{source_name}] → Skip to step {step_number + 2}')
-                    self.rotation_step = (self.rotation_step + 2) % self.rotation_cycle_length
-                    await asyncio.sleep(1)
+            if self.pending_news and self._post_wait_seconds() <= 0:
+                news = self.pending_news[0]
+                if news['link'] in self.sent_links:
+                    self.pending_news.pop(0)
+                    self._save_state()
                     continue
-                
-                # ✅ بررسی تکراری نبودن (اضافه برای اطمینان)
-                title_to_check = news.get('title', '')
-                if self._is_duplicate(title_to_check):
-                    self.log(f'🔄 Duplicate news from [{source_name}] → Skip')
-                    self.rotation_step = (self.rotation_step + 2) % self.rotation_cycle_length
-                    await asyncio.sleep(1)
-                    continue
-                
-                # ✅ ارسال خبر
-                sent = False
-                if news_type == 'domestic':
-                    sent = await self._send_domestic_direct(news)
-                
-                if sent:
-                    self.log(f'✅ Step {step_number}: Published from [{source_name}]')
-                    # ✅ حرکت به منبع بعدی؛ فاصله انتشار در ابتدای حلقه اعمال می‌شود
-                    self.rotation_step = (self.rotation_step + 2) % self.rotation_cycle_length
+                if await self._send_domestic_direct(news):
+                    self.pending_news.pop(0)
+                    self._save_state()
                 else:
-                    # ❌ ارسال ناموفق → +2 (رد کردن انتظار)
-                    self.log(f'❌ Step {step_number}: Failed to send from [{source_name}] → Skip')
-                    self.rotation_step = (self.rotation_step + 2) % self.rotation_cycle_length
-                
-                await asyncio.sleep(2)
-                
-            elif step_type == 'wait':
-                # فاصله انتشار در ابتدای حلقه اعمال می‌شود.
-                self.rotation_step = (self.rotation_step + 1) % self.rotation_cycle_length
+                    # Keep the post for retry instead of losing it on an API failure.
+                    await asyncio.sleep(30)
+                    continue
+            await asyncio.sleep(1)
 
     def _secs_to_fetch(self):
         if not self.next_fetch_time:
@@ -1178,7 +1028,7 @@ class SmartNewsBot:
     # ==================== ✅ اجرای اصلی ====================
     async def run(self):
         self.log('=' * 70)
-        self.log('🤖 Rubika News Bot - Source Rotation')
+        self.log('🤖 Telegram @akhbarefori → Rubika')
         self.log('=' * 70)
         try:
             info = await self.bot.get_me()
@@ -1196,12 +1046,9 @@ class SmartNewsBot:
                 self.log('⚠️ مطمئن شوید ربات در کانال روبیکا عضو و ادمین باشد')
             self.log(f'⏱️ Interval: {self.fetch_interval//60}m')
             self.log(f'⏸️ Post delay: {POST_INTERVAL}s')
-            self.log(f'🔥 Viral Detection: Active (دقیق - چندمنبعی با پنجره زمانی)')
-            self.log(f'🚨 Breaking Detection: Active (دقیق - امتیازدهی وزنی)')
             self.log(f'✍️ News Style: Active (سبک خبری روی همه خبرها)')
-            self.log(f'🔁 Algorithm: Source Rotation ({self.rotation_cycle_length} steps) - تنها الگوریتم')
             self.log(f'📤 مقصد انتشار: فقط کانال روبیکا')
-            self.log(f'🇮🇷 منابع: فقط داخلی | بدون لینک خبر در پست‌ها')
+            self.log('📥 Source: Telegram @akhbarefori | text only, no links')
             self.log('=' * 70 + '\n')
         except Exception as e:
             self.rubika_connected = False
@@ -1216,9 +1063,7 @@ class SmartNewsBot:
         self.next_fetch_time = datetime.now() + timedelta(seconds=self.fetch_interval)
         
         try:
-            # ✅ حلقه اصلی - تنها الگوریتم: Source Rotation
-            while self.is_running:
-                await self.publish_loop_source_rotation()
+            await self.publish_loop()
         except Exception as e:
             self.log(f'❌ Fatal: {e}')
             import traceback
