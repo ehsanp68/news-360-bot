@@ -1,6 +1,8 @@
 import os
 import tempfile
 import unittest
+from datetime import datetime, timezone
+import time
 from unittest.mock import patch
 
 import aiohttp
@@ -9,7 +11,7 @@ import bot
 
 def page(*posts):
     return ''.join(f'<div class="tgme_widget_message" data-post="akhbarefori/{i}">'
-                   f'{body}</div>' for i, body in posts)
+                   f'{body}<time datetime="{datetime.now(timezone.utc).isoformat()}"></time></div>' for i, body in posts)
 
 
 def text(value):
@@ -83,6 +85,7 @@ class TelegramTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_failed_rubika_send_keeps_queued_post(self):
         item = self.b._telegram_item(42, 'عنوان\nمتن خبر')
+        item['published_at'] = time.time() - 121
         self.b.pending_news = [item]
         self.b._save_state()
         self.b.last_fetch_time = bot.datetime.now()
@@ -92,7 +95,7 @@ class TelegramTests(unittest.IsolatedAsyncioTestCase):
             raise bot.RubikaAPIError('temporary failure')
 
         async def stop_after_retry(seconds):
-            self.assertEqual(seconds, 30)
+            self.assertEqual(seconds, 1)
             self.b.is_running = False
 
         self.b.bot.send_message = fail_send
@@ -102,6 +105,29 @@ class TelegramTests(unittest.IsolatedAsyncioTestCase):
         restarted = bot.SmartNewsBot(bot_token='test', channel_id='@rubika')
         self.assertEqual(restarted.pending_news, [item])
         self.assertIsNone(restarted.last_post_time)
+
+    async def test_first_start_ignores_old_posts_and_schedules_recent(self):
+        FakeSession.pages = {None: (
+            '<div class="tgme_widget_message" data-post="akhbarefori/1">'
+            '<div class="tgme_widget_message_text">قدیمی</div>'
+            '<time datetime="2026-01-01T00:00:00Z"></time></div>'
+            '<div class="tgme_widget_message" data-post="akhbarefori/2">'
+            '<div class="tgme_widget_message_text">جدید</div>'
+            '<time datetime="2026-01-01T00:09:00Z"></time></div>'
+            '<div class="tgme_widget_message" data-post="akhbarefori/3">'
+            '<div class="tgme_widget_message_text">بدون تاریخ</div></div>')}
+        from datetime import datetime, timezone
+        now = datetime(2026, 1, 1, 0, 10, tzinfo=timezone.utc).timestamp()
+        with patch.object(bot.aiohttp, 'ClientSession', FakeSession), patch.object(bot.time, 'time', return_value=now):
+            await self.b.fetch_all_news()
+            self.assertEqual([n['link'].split('/')[-1] for n in self.b.pending_news], ['2'])
+            self.assertEqual(self.b._post_wait_seconds(), 60)
+            self.assertEqual(self.b.telegram_cursor, 3)
+            # Manually omit timestamp; after startup the safe fallback is discovery time.
+            FakeSession.pages = {None: '<div class="tgme_widget_message" data-post="akhbarefori/4"><div class="tgme_widget_message_text">جدید</div></div>', 4: page((3, text("قبلی")))}
+            await self.b.fetch_all_news()
+            self.assertEqual(self.b.pending_news[-1]['published_at'], now)
+            self.assertEqual(self.b._post_wait_seconds(self.b.pending_news[-1]), 120)
 
     async def test_bad_pagination_does_not_advance_cursor(self):
         self.b.telegram_cursor = 1

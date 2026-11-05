@@ -6,6 +6,7 @@ import asyncio
 import os
 import sys
 import json
+import time
 import tempfile
 from datetime import datetime
 
@@ -88,6 +89,7 @@ async def test_cloud_runner(base_url, tmp):
                 "title": "خبر ابری آزمایشی", "summary": "خلاصه",
                 "link": f"https://example.com/cloud/{datetime.now().timestamp()}",
                 "source": "ایرنا", "category": "عمومی", "emoji": "📰",
+                "published_at": time.time() - 121,
             })
             self.last_fetch_time = datetime.now()
 
