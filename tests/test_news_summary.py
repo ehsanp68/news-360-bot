@@ -46,7 +46,7 @@ class NewsSummaryTests(unittest.IsolatedAsyncioTestCase):
         async def photo(chat, url, caption): sent.append(caption)
         self.b.bot.send_photo = photo
         self.assertTrue(await self.b._send_domestic_direct(item))
-        self.assertEqual(sent, ['عنوان خبر\n\nجمله نخست.'])
+        self.assertEqual(sent, ['عنوان خبر\n\nجمله نخست.\n\nhttps://rubika.ir/rubika\n🇮🇷'])
 
     async def test_resume_legacy_partial_delivery_uses_original_text(self):
         item = {'title': 'عنوان', 'summary': 'جمله اول. جمله دوم.', 'link': 'https://example.com/6',
@@ -55,7 +55,31 @@ class NewsSummaryTests(unittest.IsolatedAsyncioTestCase):
         async def message(chat_id, text): captured.append(text)
         self.b.bot.send_message = message
         self.assertTrue(await self.b._send_domestic_direct(item))
-        self.assertEqual(captured, ['عنوان\n\nجمله اول. جمله دوم.'])
+        self.assertEqual(captured, ['عنوان\n\nجمله اول. جمله دوم.\n\nhttps://rubika.ir/rubika\n🇮🇷'])
+
+    async def test_link_fist_emoji_removed_from_news(self):
+        item = self.b._telegram_item(6, 'عنوان خبر\nمتن خبر اول.\nLink ✊')
+        result = await self.b._format(item)
+        self.assertNotIn('Link', result)
+        self.assertNotIn('✊', result)
+        item = self.b._telegram_item(7, 'عنوان خبر\nمتن خبر دوم. 👊 Link')
+        self.assertNotIn('Link', await self.b._format(item))
+        self.assertNotIn('👊', await self.b._format(item))
+
+    async def test_standalone_link_fist_line_dropped(self):
+        item = self.b._telegram_item(8, 'عنوان خبر\nمتن خبر.\nLink ✊')
+        self.assertNotIn('Link', item['summary'])
+        self.assertNotIn('✊', item['summary'])
+
+    async def test_every_post_ends_with_channel_address_and_iran_flag(self):
+        item = self.b._telegram_item(9, 'عنوان خبر\nجمله خبر.')
+        sent = []
+        async def message(chat_id, text): sent.append(text)
+        self.b.bot.send_message = message
+        self.assertTrue(await self.b._send_domestic_direct(item))
+        self.assertEqual(len(sent), 1)
+        self.assertTrue(sent[0].endswith('https://rubika.ir/rubika\n🇮🇷'))
+        self.assertTrue(sent[0].startswith('عنوان خبر'))
 
 
 if __name__ == '__main__': unittest.main()
