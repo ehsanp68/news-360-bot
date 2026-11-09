@@ -51,6 +51,38 @@ class PublishingTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(seen, ['one', 'two'])
             self.assertEqual([item['link'] for item in b.pending_news], ['one'])
 
+    async def test_slow_failed_posts_do_not_starve_later_due_news(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(bot, 'STATE_FILE', os.path.join(tmp, 'state.json')):
+            b = bot.SmartNewsBot(bot_token='test', channel_id='@channel')
+            b.pending_news = [
+                dict(title=f'عنوان {i}', summary='متن', link=str(i), published_at=1)
+                for i in range(1, 5)
+            ]
+            b.is_running = True
+            clock = [200.0]
+            attempted = []
+
+            async def send(item):
+                attempted.append(item['link'])
+                if item['link'] == '4':
+                    b.is_running = False
+                    return True
+                # Simulate a slow Telegram-media refresh that lasts longer
+                # than the gap between retry deadlines.
+                clock[0] += 20
+                return False
+
+            async def advance(seconds):
+                clock[0] += seconds
+
+            b._send_domestic_direct = send
+            with (patch.object(bot.time, 'time', side_effect=lambda: clock[0]),
+                  patch.object(bot.asyncio, 'sleep', advance)):
+                await b.publish_loop()
+
+            self.assertEqual(attempted, ['1', '2', '3', '4'])
+            self.assertEqual([item['link'] for item in b.pending_news], ['1', '2', '3'])
+
     async def test_plain_output_for_all_types(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(bot, 'STATE_FILE', os.path.join(tmp, 'state.json')):
             b = bot.SmartNewsBot(bot_token='test', channel_id='@channel')

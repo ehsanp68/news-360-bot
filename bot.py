@@ -1224,8 +1224,18 @@ class SmartNewsBot:
                     self._retry_after.pop(link, None)
                     self._save_state()
                     continue
-                # One unavailable video must not block other due news.
+                # A slow media refresh can take long enough that an earlier
+                # item's retry deadline expires before we reach later items.
+                # Rotate failures to the tail so one unavailable post cannot
+                # starve the rest of the due queue.
                 self._retry_after[link] = time.time() + RETRY_DELAY
+                try:
+                    self.pending_news.remove(news)
+                    self.pending_news.append(news)
+                    self._save_state()
+                except ValueError:
+                    # The item may have been removed by another state update.
+                    pass
             await asyncio.sleep(1)
 
     def _secs_to_fetch(self):
